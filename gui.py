@@ -38,8 +38,10 @@ class WFrame(Frame, QMainWindow, metaclass=WFrameMeta):
 		except KeyError:
 			print("Unknown keycode: " + str(event.key()))
 
-@WFrame(size=(800, 600))
-async def main():
-	await keys.Escape#sleep(1)
 
-run(main)
+if __name__ == "__main__":
+	@WFrame(size=(800, 600))
+	async def main():
+		await keys.Escape#sleep(1)
+
+	run(main)

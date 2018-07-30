@@ -1,8 +1,7 @@
 import collections.abc
 import inspect
 import sys
-import types
-import unittest
+import traceback
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QTimer, QObject
 
@@ -97,6 +96,22 @@ class sleep(Awaitable):
 class Frame(Awaitable):
 	_current = None
 
+	def __new__(cls, *frameclassargs, **frameclasskwargs):
+		sup = super()
+		def ___new__(framefunc):
+			def create_frame(*frameargs, **framekwargs):
+				frame = sup.__new__(cls)
+				frame.__init__(framefunc, *frameargs, **framekwargs)
+				return frame
+			return create_frame
+
+		if len(frameclassargs) == 1 and not frameclasskwargs and callable(frameclassargs[0]): # If @frame was called without parameters
+			framefunc = frameclassargs[0]
+			frameclassargs = ()
+			return ___new__(framefunc)
+		else: # If @frame was called with parameters
+			return ___new__
+
 	def __init__(self, framefunc, *frameargs, **framekwargs):
 		self._framefunc = framefunc
 		self.__name__ = framefunc.__name__
@@ -165,56 +180,12 @@ class Frame(Awaitable):
 
 
 def define_frame(*defineframeargs, **defineframekwargs):
-	def _define_frame(frameclass):
-		def create_framefactory(*frameclassargs, **frameclasskwargs):
-			def _create_framefactory(framefunc):
-				def create_frame(*frameargs, **framekwargs):
-					return frameclass(framefunc, *frameargs, **framekwargs)
-					# frameinstance = frameclass(frame)
-					# await frameinstance.run(*frameargs, **framekwargs)
-					# frameinstance.remove()
-				return create_frame
-
-			if len(frameclassargs) == 1 and not frameclasskwargs and callable(frameclassargs[0]): # If @frame was called without parameters
-				framefunc = frameclassargs[0]
-				frameclassargs = ()
-				return _create_framefactory(framefunc)
-			else: # If @frame was called with parameters
-				return _create_framefactory
-
-		# Clone class variables and static functions from frameclass into create_framefactory
-		for key, value in frameclass.__dict__.items():
-			if not key.startswith('__'):
-				create_framefactory.__dict__[key] = value.__func__ if hasattr(value, '__func__') else value # .__func__ ... Bind staticmethod objects to functions
-
-		return create_framefactory
-
 	if len(defineframeargs) == 1 and not defineframekwargs and inspect.isclass(defineframeargs[0]): # If @define_frame was called without parameters
 		frameclass = defineframeargs[0]
 		defineframeargs = ()
-		return _define_frame(frameclass)
+		return frameclass
 	else: # If @define_frame was called with parameters
-		return _define_frame
-
-@define_frame
-class MyFrame(Frame):
-	def __init__(self, framefunc, *frameargs, **framekwargs):
-		super().__init__(framefunc, *frameargs, **framekwargs)
-
-
-@MyFrame
-async def coroutine():
-	other(0.1, '1')
-	await other(0.2, '2')
-	print('DONE')
-
-@MyFrame
-async def other(seconds, name):
-	await sleep(seconds)
-	print(name)
-
-
-
+		return lambda frameclass: frameclass
 
 
 def update(awaitable=None):
@@ -236,6 +207,27 @@ def run(mainframe):
 		except:
 			print(traceback.format_exc())
 
-#run(coroutine)
 
+if __name__ == "__main__":
+	@define_frame
+	class MyFrame(Frame):
+		def __init__(self, framefunc, *frameargs, **framekwargs):
+			super().__init__(framefunc, *frameargs, **framekwargs)
 
+	@MyFrame
+	async def coroutine():
+		other(0.1, '1')
+		await other(0.2, '2')
+		print('DONE')
+
+	@MyFrame
+	async def other(seconds, name):
+		await sleep(seconds)
+		print(name)
+
+	print(MyFrame)
+	print(type(MyFrame))
+	print(coroutine)
+	print(type(coroutine))
+
+	run(coroutine)
