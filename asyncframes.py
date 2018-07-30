@@ -3,7 +3,7 @@ import inspect
 import sys
 import traceback
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import QTimer, QObject
+from PyQt5.QtCore import QTimer
 
 
 class Awaitable(collections.abc.Awaitable):
@@ -97,11 +97,11 @@ class Frame(Awaitable):
 	_current = None
 
 	def __new__(cls, *frameclassargs, **frameclasskwargs):
-		sup = super()
 		def ___new__(framefunc):
 			def create_frame(*frameargs, **framekwargs):
-				frame = sup.__new__(cls)
-				frame.__init__(framefunc, *frameargs, **framekwargs)
+				frame = super(Frame, cls).__new__(cls)
+				frame.__init__(*frameclassargs, **frameclasskwargs)
+				frame.create(framefunc, *frameargs, **framekwargs)
 				return frame
 			return create_frame
 
@@ -112,19 +112,20 @@ class Frame(Awaitable):
 		else: # If @frame was called with parameters
 			return ___new__
 
-	def __init__(self, framefunc, *frameargs, **framekwargs):
-		self._framefunc = framefunc
-		self.__name__ = framefunc.__name__
-		#print("creating " + self.__name__)
-
+	def __init__(self):
 		self._parent = Frame._current
 		if self._parent:
 			self._parent._children.append(self)
 		self._children = []
 		self._activechild = None
 
-		hasself = 'self' in inspect.signature(self._framefunc).parameters
-		self._generator = self._framefunc(self, *frameargs, **framekwargs) if hasself else self._framefunc(*frameargs, **framekwargs)
+		self._primitives = []
+
+	def create(self, framefunc, *frameargs, **framekwargs):
+		#self._framefunc = framefunc
+
+		hasself = 'self' in inspect.signature(framefunc).parameters
+		self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
 
 	def step(self, msg=None):
 		#if self._generator is None:
@@ -158,7 +159,6 @@ class Frame(Awaitable):
 	def __await__(self):
 		msg = None
 		while True:
-			#print("awaiting " + self.__name__)
 			if self._parent:
 				self._parent._activechild = self
 
@@ -175,6 +175,8 @@ class Frame(Awaitable):
 			child.remove()
 		if self._parent:
 			self._parent._children.remove(self)
+		for primitive in self._primitives:
+			primitive.remove()
 		#del self
 
 
@@ -208,26 +210,48 @@ def run(mainframe):
 			print(traceback.format_exc())
 
 
+class Primitive(object):
+	def __init__(self, owner):
+		# Validate parameters
+		if not issubclass(owner, Frame):
+			raise TypeError("'owner' must be of type Frame")
+
+		# Find parent frame of class 'owner'
+		self._owner = Frame._current
+		while self._owner and not issubclass(type(self._owner), owner):
+			self._owner = self._owner._parent
+		if not self._owner:
+			raise Exception(self.__class__.__name__ + " can't be defined outside " + owner.__name__)
+
+		# Register with parent frame
+		self._owner._primitives.append(self)
+
+	def remove(self):
+		self._owner._primitives.remove(self)
+
+
 if __name__ == "__main__":
 	@define_frame
-	class MyFrame(Frame):
-		def __init__(self, framefunc, *frameargs, **framekwargs):
-			super().__init__(framefunc, *frameargs, **framekwargs)
+	class MyFrame1(Frame):
+		pass
+	@define_frame
+	class MyFrame2(Frame):
+		pass
 
-	@MyFrame
+	class MyPrimitive(Primitive):
+		def __init__(self):
+			super().__init__(MyFrame1)
+
+	@MyFrame1
 	async def coroutine():
 		other(0.1, '1')
 		await other(0.2, '2')
 		print('DONE')
 
-	@MyFrame
+	@MyFrame2
 	async def other(seconds, name):
+		p = MyPrimitive()
 		await sleep(seconds)
 		print(name)
-
-	print(MyFrame)
-	print(type(MyFrame))
-	print(coroutine)
-	print(type(coroutine))
 
 	run(coroutine)

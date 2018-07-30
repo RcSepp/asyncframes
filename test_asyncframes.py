@@ -3,7 +3,7 @@ import io
 import sys
 import unittest
 from PyQt5.QtWidgets import QApplication
-from asyncframes import run, sleep, define_frame, Frame
+from asyncframes import run, sleep, define_frame, Frame, Primitive
 
 def log(msg):
 	t = (datetime.datetime.now() - starttime).total_seconds()
@@ -11,12 +11,18 @@ def log(msg):
 
 @define_frame
 class MyFrame(Frame):
-	def __init__(self, framefunc, *frameargs, **framekwargs):
-		super().__init__(framefunc, *frameargs, **framekwargs)
 	@staticmethod
 	def mystaticmethod():
 		print('static method called!')
 	classvar = 'class variable'
+
+@define_frame
+class MyFrame2(Frame):
+	pass
+
+class MyPrimitive(Primitive):
+	def __init__(self):
+		super().__init__(MyFrame)
 
 @MyFrame
 async def wait(seconds, name):
@@ -93,6 +99,26 @@ class Tests (unittest.TestCase):
 			print(MyFrame.classvar)
 		run(main)
 		self.assertEqual(sys.stdout.getvalue(), 'class variable\n')
+
+	def test_primitive(self):
+		@MyFrame
+		async def f1():
+			MyPrimitive()
+		run(f1)
+
+		@MyFrame2
+		async def f2():
+			MyPrimitive()
+		with self.assertRaises(Exception):
+			run(f2)
+
+		@MyFrame
+		async def f3():
+			f2()
+		run(f3)
+
+		with self.assertRaises(Exception):
+			MyPrimitive()
 
 if __name__ == "__main__":
 	unittest.main()

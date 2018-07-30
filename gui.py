@@ -1,7 +1,7 @@
 import abc
-from PyQt5.QtWidgets import QApplication, QWidget, QMainWindow, QLayout, QHBoxLayout, QVBoxLayout
+from PyQt5.QtWidgets import QWidget, QMainWindow, QLayout, QHBoxLayout, QVBoxLayout, QPushButton
 from PyQt5.QtCore import QObject
-from asyncframes import run, sleep, define_frame, Frame
+from asyncframes import run, sleep, define_frame, Frame, Primitive
 import keys
 
 class WFrameMeta(type(QObject), abc.ABCMeta):
@@ -9,11 +9,15 @@ class WFrameMeta(type(QObject), abc.ABCMeta):
 
 @define_frame(123)
 class WFrame(Frame, QMainWindow, metaclass=WFrameMeta):
-	def __init__(self, framefunc, *frameargs, **framekwargs):
-		super().__init__(framefunc, *frameargs, **framekwargs)
+	def __init__(self, size=None, title=None, layout=None):
+		super().__init__()
 
 		QMainWindow.__init__(self)
-		self.setWindowTitle('TODO')
+		if size:
+			#self.setGeometry(300, 300, *size)
+			self.resize(*size)
+		if title is not None:
+			self.setWindowTitle(title)
 		self.widget = QWidget()
 		self.layout = None
 		self.setCentralWidget(self.widget)
@@ -38,10 +42,30 @@ class WFrame(Frame, QMainWindow, metaclass=WFrameMeta):
 		except KeyError:
 			print("Unknown keycode: " + str(event.key()))
 
+class Widget(Primitive):
+	def __init__(self):
+		super().__init__(WFrame)
+
+	def _show(self, pos):
+		self.qtwidget.resize(self.qtwidget.sizeHint())
+		if pos is not None: self.qtwidget.move(pos.x, pos.y)
+		if self._owner.layout is not None:
+			self._owner.layout.addWidget(self.qtwidget)
+		else:
+			self.qtwidget.show()
+
+class Button(Widget):
+	def __init__(self, text="Button", pos=None):
+		super().__init__()
+		self.qtwidget = QPushButton(text, self._owner.widget)
+		#self.click = fhm.Action()
+		#self.qtwidget.clicked.connect(lambda: self.click.fire())
+		self._show(pos)
 
 if __name__ == "__main__":
-	@WFrame(size=(800, 600))
+	@WFrame(size=(200, 50), title="gui")
 	async def main():
+		Button()
 		await keys.Escape#sleep(1)
 
 	run(main)
