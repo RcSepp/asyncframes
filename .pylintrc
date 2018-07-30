@@ -1,0 +1,18 @@
+[FORMAT]
+variable-rgx: [a-z] # Allow single-character variable names (i.e. x = 10)
+
+[MESSAGES CONTROL]
+disable=
+	mixed-indentation,
+	line-too-long,
+	invalid-name,
+	missing-docstring,
+	no-member,
+	unused-wildcard-import,
+	wildcard-import,
+	unidiomatic-typecheck,
+	unused-argument,
+	multiple-statements,
+	relative-import
+	bad-continuation
+	
