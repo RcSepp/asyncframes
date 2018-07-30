@@ -181,6 +181,12 @@ def define_frame(*defineframeargs, **defineframekwargs):
 				return _create_framefactory(framefunc)
 			else: # If @frame was called with parameters
 				return _create_framefactory
+
+		# Clone class variables and static functions from frameclass into create_framefactory
+		for key, value in frameclass.__dict__.items():
+			if not key.startswith('__'):
+				create_framefactory.__dict__[key] = value.__func__ if hasattr(value, '__func__') else value # .__func__ ... Bind staticmethod objects to functions
+
 		return create_framefactory
 
 	if len(defineframeargs) == 1 and not defineframekwargs and inspect.isclass(defineframeargs[0]): # If @define_frame was called without parameters

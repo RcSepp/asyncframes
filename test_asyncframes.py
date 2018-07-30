@@ -13,6 +13,10 @@ def log(msg):
 class MyFrame(Frame):
 	def __init__(self, framefunc, *frameargs, **framekwargs):
 		super().__init__(framefunc, *frameargs, **framekwargs)
+	@staticmethod
+	def mystaticmethod():
+		print('static method called!')
+	classvar = 'class variable'
 
 @MyFrame
 async def wait(seconds, name):
@@ -33,7 +37,6 @@ class Tests (unittest.TestCase):
 		async def main():
 			wait(0.1, '1')
 			await wait(0.2, '2')
-		
 		run(main)
 		self.assertEqual(sys.stdout.getvalue(), '0.1: 1\n0.2: 2\n')
 
@@ -42,7 +45,6 @@ class Tests (unittest.TestCase):
 		async def main():
 			await wait(0.1, '1')
 			await wait(0.2, '2')
-		
 		run(main)
 		self.assertEqual(sys.stdout.getvalue(), '0.1: 1\n0.3: 2\n')
 
@@ -51,7 +53,6 @@ class Tests (unittest.TestCase):
 		async def main():
 			await wait(0.1, '1')
 			wait(0.2, '2')
-		
 		run(main)
 		self.assertEqual(sys.stdout.getvalue(), '0.1: 1\n')
 
@@ -60,7 +61,6 @@ class Tests (unittest.TestCase):
 		async def main():
 			wait(0.1, '1')
 			wait(0.2, '2')
-		
 		run(main)
 		self.assertEqual(sys.stdout.getvalue(), '')
 
@@ -70,7 +70,6 @@ class Tests (unittest.TestCase):
 			w1 = wait(0.1, '1')
 			w2 = wait(0.2, '2')
 			await (w1 & w2)
-		
 		run(main)
 		self.assertEqual(sys.stdout.getvalue(), '0.1: 1\n0.2: 2\n')
 
@@ -78,9 +77,22 @@ class Tests (unittest.TestCase):
 		@MyFrame
 		async def main():
 			print(await wait(0.1, '1'))
-		
 		run(main)
 		self.assertEqual(sys.stdout.getvalue(), '0.1: 1\nsome result\n')
+
+	def test_staticmethod(self):
+		@MyFrame
+		async def main():
+			MyFrame.mystaticmethod()
+		run(main)
+		self.assertEqual(sys.stdout.getvalue(), 'static method called!\n')
+
+	def test_classvar(self):
+		@MyFrame
+		async def main():
+			print(MyFrame.classvar)
+		run(main)
+		self.assertEqual(sys.stdout.getvalue(), 'class variable\n')
 
 if __name__ == "__main__":
 	unittest.main()
