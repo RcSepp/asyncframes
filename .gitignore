@@ -1,6 +1,3 @@
 # Python cache
 __pycache__/
 *.pyc
-
-# VSCode user settings
-settings.json
