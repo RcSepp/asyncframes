@@ -1,8 +1,14 @@
 import abc
-from PyQt5.QtWidgets import QWidget, QMainWindow, QLayout, QHBoxLayout, QVBoxLayout, QPushButton
+from enum import Enum
+from PyQt5 import QtWidgets
+from PyQt5.QtWidgets import QWidget, QMainWindow, QLayout, QHBoxLayout, QVBoxLayout
 from PyQt5.QtCore import QObject
 from asyncframes import run, define_frame, Awaitable, Frame, Primitive
 import keys
+
+class Layout(Enum):
+	hbox = QHBoxLayout
+	vbox = QVBoxLayout
 
 class WFrameMeta(type(QObject), abc.ABCMeta):
 	pass
@@ -19,7 +25,11 @@ class WFrame(Frame, QMainWindow, metaclass=WFrameMeta):
 		if title is not None:
 			self.setWindowTitle(title)
 		self.widget = QWidget()
-		self.layout = None
+		if layout is not None:
+			self.layout = layout.value()
+			self.widget.setLayout(self.layout)
+		else:
+			self.layout = None
 		self.setCentralWidget(self.widget)
 		self.show()
 
@@ -57,14 +67,28 @@ class Widget(Primitive):
 class Button(Widget):
 	def __init__(self, text="Button", pos=None):
 		super().__init__()
-		self.qtwidget = QPushButton(text, self._owner.widget)
+		self.qtwidget = QtWidgets.QPushButton(text, self._owner.widget)
 		self.click = Awaitable()
 		self.qtwidget.clicked.connect(self.click.raise_event)
 		self._show(pos)
 
+class ProgressBar(Widget):
+	def __init__(self, pos=None):
+		super().__init__()
+		self.qtwidget = QtWidgets.QProgressBar(self._owner.widget)
+		self._show(pos)
+
+	@property
+	def value(self):
+		return self.qtwidget.value()
+	@value.setter
+	def value(self, value):
+		return self.qtwidget.setValue(value)
+
 if __name__ == "__main__":
-	@WFrame(size=(200, 50), title="gui")
+	@WFrame(size=(200, 50), title="gui", layout=Layout.hbox)
 	async def main():
+		pb = ProgressBar()
 		btn = Button()
 		await btn.click#keys.Escape#sleep(1)
 
