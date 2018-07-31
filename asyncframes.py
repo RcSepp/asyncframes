@@ -176,12 +176,12 @@ class Frame(Awaitable):
 	def remove(self):
 		self._generator.close()
 		#self._generator = None
-		for child in self._children:
-			child.remove()
+		while self._children:
+			self._children[-1].remove()
 		if self._parent:
 			self._parent._children.remove(self)
-		for primitive in self._primitives:
-			primitive.remove()
+		while self._primitives:
+			self._primitives[-1].remove()
 		#del self
 
 
