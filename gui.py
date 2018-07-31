@@ -1,7 +1,7 @@
 import abc
 from PyQt5.QtWidgets import QWidget, QMainWindow, QLayout, QHBoxLayout, QVBoxLayout, QPushButton
 from PyQt5.QtCore import QObject
-from asyncframes import run, sleep, define_frame, Frame, Primitive
+from asyncframes import run, define_frame, Awaitable, Frame, Primitive
 import keys
 
 class WFrameMeta(type(QObject), abc.ABCMeta):
@@ -58,14 +58,14 @@ class Button(Widget):
 	def __init__(self, text="Button", pos=None):
 		super().__init__()
 		self.qtwidget = QPushButton(text, self._owner.widget)
-		#self.click = fhm.Action()
-		#self.qtwidget.clicked.connect(lambda: self.click.fire())
+		self.click = Awaitable()
+		self.qtwidget.clicked.connect(self.click.raise_event)
 		self._show(pos)
 
 if __name__ == "__main__":
 	@WFrame(size=(200, 50), title="gui")
 	async def main():
-		Button()
-		await keys.Escape#sleep(1)
+		btn = Button()
+		await btn.click#keys.Escape#sleep(1)
 
 	run(main)
