@@ -12,20 +12,20 @@ class Key(Awaitable):
 
 class AnyKey(Key):
 	def __init__(self):
-		super().__init__('Any')
+		super().__init__('any')
 	def __await__(self):
 		msg = yield(self) #TODO: Value sended by yield (self) not required
 		while not isinstance(msg, Key):
 			msg = yield(self) #TODO: Value sended by yield (self) not required
 		return msg
 
-Escape = Key('Escape')
-Return = Key('Return')
-Left = Key('Left')
-Right = Key('Right')
-Up = Key('Up')
-Down = Key('Down')
-Any = AnyKey()
+escape = Key('escape')
+enter = Key('enter')
+left = Key('left')
+right = Key('right')
+up = Key('up')
+down = Key('down')
+anykey = AnyKey()
 
 def onkeydown(key):
 	key.isdown = True
@@ -47,5 +47,5 @@ if __name__ == "__main__":
 	import keys
 	@WFrame
 	async def main():
-		print(await keys.Any)
+		print(await keys.anykey)
 	run(main)

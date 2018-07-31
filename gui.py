@@ -76,12 +76,12 @@ class WFrame(WLFrame, QMainWindow, metaclass=WFrameMeta):
 		self.show()
 
 	_keymap = {
-		16777216: keys.Escape,
-		16777220: keys.Return,
-		16777234: keys.Left,
-		16777236: keys.Right,
-		16777235: keys.Up,
-		16777237: keys.Down
+		16777216: keys.escape,
+		16777220: keys.enter,
+		16777234: keys.left,
+		16777236: keys.right,
+		16777235: keys.up,
+		16777237: keys.down
 	}
 	def keyPressEvent(self, event):
 		try:
@@ -138,7 +138,7 @@ if __name__ == "__main__":
 	async def main():
 		btn = Button()
 		intermediate_frame()
-		await btn.click#keys.Escape#sleep(1)
+		await btn.click#keys.escape#sleep(1)
 
 	@Frame
 	async def intermediate_frame():
