@@ -11,6 +11,7 @@ class Awaitable(collections.abc.Awaitable):
 		msg = yield(self) #TODO: Value sended by yield (self) not required
 		while msg != self:
 			msg = yield(self) #TODO: Value sended by yield (self) not required
+		return msg
 	def raise_event(self):
 		update(self)
 	def __and__(self, other):
@@ -87,6 +88,7 @@ class sleep(Awaitable):
 		msg = yield(self) #TODO: Value sended by yield (self) not required
 		while msg != self and not self.non_blocking:
 			msg = yield(self) #TODO: Value sended by yield (self) not required
+		return msg
 
 class hold(Awaitable):
 	def raise_event():
