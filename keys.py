@@ -1,4 +1,4 @@
-from asyncframes import Awaitable, update
+from asyncframes import Awaitable
 
 pressed = set()
 
@@ -7,10 +7,6 @@ class Key(Awaitable):
 		self.name = name
 		self.isdown = False
 		self.ispressed = False
-	def __await__(self):
-		msg = yield(self) #TODO: Value sended by yield (self) not required
-		while msg != self:
-			msg = yield(self) #TODO: Value sended by yield (self) not required
 
 Escape = Key('Escape')
 Return = Key('Return')
@@ -23,7 +19,7 @@ def onkeydown(key):
 	key.isdown = True
 	key.ispressed = True
 	pressed.add(key)
-	update(key)
+	key.raise_event()
 
 def onkeyup(key):
 	key.isdown = False

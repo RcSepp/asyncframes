@@ -7,10 +7,12 @@ from PyQt5.QtCore import QTimer
 
 
 class Awaitable(collections.abc.Awaitable):
-	def __and__(self, other):
-		print(self)
-
-class Awaitable(Awaitable):
+	def __await__(self):
+		msg = yield(self) #TODO: Value sended by yield (self) not required
+		while msg != self:
+			msg = yield(self) #TODO: Value sended by yield (self) not required
+	def raise_event(self):
+		update(self)
 	def __and__(self, other):
 		return AndAwaitable(self, other)
 	# def __or__(self, other):
@@ -79,13 +81,7 @@ class AndAwaitable(Awaitable):
 class sleep(Awaitable):
 	def __init__(self, seconds):
 		self._seconds = seconds #DELETE
-		QTimer.singleShot(1000 * seconds, lambda: update(self))
-	def __await__(self):
-		msg = yield(self) #TODO: Value sended by yield (self) not required
-		while msg != self:
-			#print('self: {} != yield: {}'.format(self._seconds, msg._seconds if msg else msg))
-			msg = yield(self) #TODO: Value sended by yield (self) not required
-		#print('self: {} == yield: {}'.format(self._seconds, msg._seconds if msg else msg))
+		QTimer.singleShot(1000 * seconds, self.raise_event)
 
 # @types.coroutine
 # def sleep(seconds):
