@@ -79,9 +79,18 @@ class AndAwaitable(Awaitable):
 
 
 class sleep(Awaitable):
-	def __init__(self, seconds):
-		self._seconds = seconds #DELETE
-		QTimer.singleShot(1000 * seconds, self.raise_event)
+	def __init__(self, seconds=0.0):
+		self.non_blocking = seconds <= 0.0
+		if not self.non_blocking:
+			QTimer.singleShot(1000 * seconds, self.raise_event)
+	def __await__(self):
+		msg = yield(self) #TODO: Value sended by yield (self) not required
+		while msg != self and not self.non_blocking:
+			msg = yield(self) #TODO: Value sended by yield (self) not required
+
+class hold(Awaitable):
+	def raise_event():
+		pass # hold can't be raised
 
 # @types.coroutine
 # def sleep(seconds):
