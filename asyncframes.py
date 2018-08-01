@@ -7,70 +7,94 @@ from PyQt5.QtCore import QTimer
 
 
 class Awaitable(collections.abc.Awaitable):
+	def __init__(self):
+		self._parent = None
+	def remove(self):
+		pass
 	def __await__(self):
-		msg = yield(self) #TODO: Value sended by yield (self) not required
-		while msg != self:
-			msg = yield(self) #TODO: Value sended by yield (self) not required
-		return msg
+		msg = None
+		while True:
+			if self._parent:
+				self._parent._activechild = self
+			try:
+				msg = yield(self.step(msg))
+			except StopIteration as stop:
+				return stop.value
+	def step(self, msg=None):
+		if msg == self:
+			stop = StopIteration()
+			stop.value = self
+			raise stop
+		return self #TODO: Return value "self" not required
 	def raise_event(self):
 		update(self)
 	def __and__(self, other):
-		return AndAwaitable(self, other)
-	# def __or__(self, other):
-	# 	return OrAwaitable(self, other)
+		return and_(self, other)
+	def __or__(self, other):
+		return or_(self, other)
 
-class AndAwaitable(Awaitable):
-	def __init__(self, a1, a2):
-		self.a1 = a1
-		self.a2 = a2
+class and_(Awaitable):
+	def __init__(self, *awaitables):
+		super().__init__()
 
 		self._parent = Frame._current
 		if self._parent:
 			self._parent._children.append(self)
-		self._children = [a1, a2]
-		if self.a1._parent:
-			self.a1._parent._children.remove(a1)
-		self.a1._parent = self
-		if self.a2._parent:
-			self.a2._parent._children.remove(a2)
-		self.a2._parent = self
-	def __await__(self):
-		d1, d2 = False, False
-		r1, r2 = None, None
-		msg = None
+		self._children = list(awaitables)
 
-		try:
-			r1 = self.a1.step(msg)
-		except StopIteration as stop:
-			r1 = stop.value
-			d1 = True
-		try:
-			r2 = self.a2.step(msg)
-		except StopIteration as stop:
-			r2 = stop.value
-			d2 = True
+		# Adopt self._children
+		for child in self._children:
+			if child._parent:
+				child._parent._children.remove(child)
+			child._parent = self
 
-		while not (d1 and d2):
-			if self._parent:
-				self._parent._activechild = self
+		self.results = {}
 
-			msg = yield((r1, r2))
+	def step(self, msg=None):
+		for child in self._children:
+			try:
+				self.results[child] = child.step(msg)
+			except StopIteration as stop:
+				self.results[child] = stop.value
 
-			if not d1:
-				try:
-					r1 = self.a1.step(msg)
-				except StopIteration as stop:
-					r1 = stop.value
-					d1 = True
+		if self._children: # If some children aren't finished yet
+			return None
+		else: # If all children finished and removed themselves from self._children
+			stop = StopIteration()
+			stop.value = self.results.values()
+			raise stop
 
-			if not d2:
-				try:
-					r2 = self.a2.step(msg)
-				except StopIteration as stop:
-					r2 = stop.value
-					d2 = True
-		return (r1, r2)
-	
+	def remove(self):
+		for child in self._children:
+			child.remove()
+		if self._parent:
+			self._parent._children.remove(self)
+		#del self
+
+class or_(Awaitable):
+	def __init__(self, *awaitables):
+		super().__init__()
+
+		self._parent = Frame._current
+		if self._parent:
+			self._parent._children.append(self)
+		self._children = list(awaitables)
+
+		# Adopt self._children
+		for child in self._children:
+			if child._parent:
+				child._parent._children.remove(child)
+			child._parent = self
+
+		self.results = {}
+
+	def step(self, msg=None):
+		for child in self._children:
+			child.step(msg)
+		
+		# If no child raised StopIteration
+		return None
+
 	def remove(self):
 		for child in self._children:
 			child.remove()
@@ -81,14 +105,16 @@ class AndAwaitable(Awaitable):
 
 class sleep(Awaitable):
 	def __init__(self, seconds=0.0):
+		super().__init__()
 		self.non_blocking = seconds <= 0.0
 		if not self.non_blocking:
 			QTimer.singleShot(1000 * seconds, self.raise_event)
-	def __await__(self):
-		msg = yield(self) #TODO: Value sended by yield (self) not required
-		while msg != self and not self.non_blocking:
-			msg = yield(self) #TODO: Value sended by yield (self) not required
-		return msg
+	def step(self, msg=None):
+		if msg == self or self.non_blocking:
+			stop = StopIteration()
+			stop.value = self
+			raise stop
+		return self #TODO: Return value "self" not required
 
 class hold(Awaitable):
 	def raise_event():
@@ -120,6 +146,7 @@ class Frame(Awaitable):
 			return ___new__
 
 	def __init__(self):
+		super().__init__()
 		self._parent = Frame._current
 		if self._parent:
 			self._parent._children.append(self)
@@ -163,18 +190,6 @@ class Frame(Awaitable):
 		# Return iteration result of active child frame
 		return result
 
-	def __await__(self):
-		msg = None
-		while True:
-			if self._parent:
-				self._parent._activechild = self
-
-			#yield self.step()
-			try:
-				msg = yield(self.step(msg))
-			except StopIteration as stop:
-				return stop.value
-
 	def remove(self):
 		if self._generator:
 			self._generator.close()
@@ -210,6 +225,7 @@ def run(mainframe):
 	global MAIN_FRAME
 	qt = QApplication.instance() or QApplication(sys.argv)
 
+	Frame._current = None
 	MAIN_FRAME = mainframe()
 	if update():
 		try:

@@ -79,6 +79,15 @@ class Tests (unittest.TestCase):
 		run(main)
 		self.assertEqual(sys.stdout.getvalue(), '0.1: 1\n0.2: 2\n')
 
+	def test_howtoyield_6(self):
+		@MyFrame
+		async def main():
+			w1 = wait(0.1, '1')
+			w2 = wait(0.2, '2')
+			await (w1 | w2)
+		run(main)
+		self.assertEqual(sys.stdout.getvalue(), '0.1: 1\n')
+
 	def test_foo(self):
 		@MyFrame
 		async def main():

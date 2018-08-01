@@ -4,6 +4,7 @@ pressed = set()
 
 class Key(Awaitable):
 	def __init__(self, name):
+		super().__init__()
 		self.name = name
 		self.isdown = False
 		self.ispressed = False
