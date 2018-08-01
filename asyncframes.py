@@ -135,8 +135,8 @@ class Frame(Awaitable):
 		self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
 
 	def step(self, msg=None):
-		#if self._generator is None:
-		#	return None
+		if self._generator is None:
+			return None
 
 		# Activate self
 		Frame._current = self
@@ -176,8 +176,9 @@ class Frame(Awaitable):
 				return stop.value
 
 	def remove(self):
-		self._generator.close()
-		#self._generator = None
+		if self._generator:
+			self._generator.close()
+			self._generator = None
 		while self._children:
 			self._children[-1].remove()
 		if self._parent:
