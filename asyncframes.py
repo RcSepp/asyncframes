@@ -29,11 +29,11 @@ class Awaitable(collections.abc.Awaitable):
 	def raise_event(self):
 		update(self)
 	def __and__(self, other):
-		return and_(self, other)
+		return all_(self, other)
 	def __or__(self, other):
-		return or_(self, other)
+		return any_(self, other)
 
-class and_(Awaitable):
+class all_(Awaitable):
 	def __init__(self, *awaitables):
 		super().__init__()
 
@@ -71,7 +71,7 @@ class and_(Awaitable):
 			self._parent._children.remove(self)
 		#del self
 
-class or_(Awaitable):
+class any_(Awaitable):
 	def __init__(self, *awaitables):
 		super().__init__()
 
