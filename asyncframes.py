@@ -7,8 +7,10 @@ from PyQt5.QtCore import QTimer
 
 
 class Awaitable(collections.abc.Awaitable):
-	def __init__(self):
+	def __init__(self, signal=None, signal_sender=None):
 		self._parent = None
+		if signal:
+			signal.connect(lambda e: Event(signal_sender, self, e).post())
 	def remove(self):
 		pass
 	def __await__(self):
@@ -21,17 +23,29 @@ class Awaitable(collections.abc.Awaitable):
 			except StopIteration as stop:
 				return stop.value
 	def step(self, msg=None):
-		if msg == self:
+		if msg and msg.receiver == self:
 			stop = StopIteration()
-			stop.value = self
+			stop.value = msg
 			raise stop
 		return self #TODO: Return value "self" not required
-	def raise_event(self):
-		update(self)
 	def __and__(self, other):
 		return all_(self, other)
 	def __or__(self, other):
 		return any_(self, other)
+
+class Event():
+	def __init__(self, sender, receiver, args):
+		self.sender = sender
+		self.receiver = receiver
+		self.args = args
+
+	def post(self):
+		try:
+			MAIN_FRAME.step(self)
+		except StopIteration:
+			QApplication.instance().exit()
+			return False
+		return True
 
 class all_(Awaitable):
 	def __init__(self, *awaitables):
@@ -108,17 +122,22 @@ class sleep(Awaitable):
 		super().__init__()
 		self.non_blocking = seconds <= 0.0
 		if not self.non_blocking:
-			QTimer.singleShot(1000 * seconds, self.raise_event)
+			QTimer.singleShot(1000 * seconds, lambda: Event(None, self, None).post())
 	def step(self, msg=None):
-		if msg == self or self.non_blocking:
+		if self.non_blocking:
 			stop = StopIteration()
-			stop.value = self
+			stop.value = Event(None, self, None)
+			raise stop
+		if (msg and msg.receiver == self) or self.non_blocking:
+			stop = StopIteration()
+			stop.value = msg
 			raise stop
 		return self #TODO: Return value "self" not required
 
 class hold(Awaitable):
-	def raise_event():
+	def step(self, msg=None):
 		pass # hold can't be raised
+		return self #TODO: Return value "self" not required
 
 # @types.coroutine
 # def sleep(seconds):
@@ -224,6 +243,13 @@ def update(awaitable=None):
 def run(mainframe):
 	global MAIN_FRAME
 	qt = QApplication.instance() or QApplication(sys.argv)
+
+	try:
+		import qdarkstyle
+	except ImportError:
+		pass
+	else:
+		qt.setStyleSheet(qdarkstyle.load_stylesheet_pyqt5())
 
 	Frame._current = None
 	MAIN_FRAME = mainframe()

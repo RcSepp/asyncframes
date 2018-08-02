@@ -3,7 +3,7 @@ from enum import Enum
 from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import QWidget, QMainWindow, QLayout, QHBoxLayout, QVBoxLayout
 from PyQt5.QtCore import QObject
-from asyncframes import run, define_frame, Awaitable, Frame, Primitive, hold
+from asyncframes import run, define_frame, Awaitable, Event, Frame, Primitive, hold, any_
 import keys
 
 class Layout(Enum):
@@ -85,12 +85,12 @@ class WFrame(WLFrame, QMainWindow, metaclass=WFrameMeta):
 	}
 	def keyPressEvent(self, event):
 		try:
-			keys.onkeydown(WFrame._keymap[event.key()])
+			keys.onkeydown(WFrame._keymap[event.key()], self, event)
 		except KeyError:
 			print("Unknown keycode: " + str(event.key()))
 	def keyReleaseEvent(self, event):
 		try:
-			keys.onkeyup(WFrame._keymap[event.key()])
+			keys.onkeyup(WFrame._keymap[event.key()], self, event)
 		except KeyError:
 			print("Unknown keycode: " + str(event.key()))
 
@@ -116,9 +116,15 @@ class Button(Widget):
 	def __init__(self, text="Button", pos=None):
 		super().__init__()
 		self.qtwidget = QtWidgets.QPushButton(text, self._owner.widget)
-		self.click = Awaitable()
-		self.qtwidget.clicked.connect(self.click.raise_event)
+		self.click = Awaitable(self.qtwidget.clicked, self)
 		self._show(pos)
+	
+	@property
+	def text(self):
+		return self.qtwidget.text()
+	@text.setter
+	def text(self, value):
+		self.qtwidget.setText(value)
 
 class ProgressBar(Widget):
 	def __init__(self, pos=None):
@@ -134,21 +140,42 @@ class ProgressBar(Widget):
 		return self.qtwidget.setValue(value)
 
 if __name__ == "__main__":
+	# @WFrame(size=(200, 100), title="gui", layout=Layout.vbox)
+	# async def main():
+	# 	btn = Button()
+	# 	intermediate_frame()
+	# 	await btn.click#keys.escape#sleep(1)
+
+	# @Frame
+	# async def intermediate_frame():
+	# 	main_layout()
+	# 	await hold()
+
+	# @WLFrame(Layout.hbox, size=(200, 100))
+	# async def main_layout():
+	# 	ProgressBar()
+	# 	ProgressBar()
+	# 	await hold()
+
+	@WFrame(layout=Layout.hbox)
+	def hbox_window():
+		ProgressBar()
+		ProgressBar()
+
+	@WFrame(layout=Layout.vbox)
+	def vbox_window():
+		ProgressBar()
+		ProgressBar()
+
 	@WFrame(size=(200, 100), title="gui", layout=Layout.vbox)
 	async def main():
-		btn = Button()
-		intermediate_frame()
-		await btn.click#keys.escape#sleep(1)
-
-	@Frame
-	async def intermediate_frame():
-		main_layout()
-		await hold()
-
-	@WLFrame(Layout.hbox, size=(200, 100))
-	async def main_layout():
-		ProgressBar()
-		ProgressBar()
+		buttons = [
+			Button('hbox'),
+			Button('vbox')
+		]
+		layout = (await any_(*[button.click for button in buttons])).sender.text
+		if layout == 'hbox': hbox_window()
+		elif layout == 'vbox': hbox_window()
 		await hold()
 
 	run(main)

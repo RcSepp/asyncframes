@@ -5,9 +5,12 @@ import unittest
 from PyQt5.QtWidgets import QApplication
 from asyncframes import run, sleep, define_frame, Frame, Primitive
 
-def log(msg):
+def log(msg=None):
 	t = (datetime.datetime.now() - starttime).total_seconds()
-	print(round(t, 1), ": ", msg, sep='')
+	if msg:
+		print(round(t, 1), ": ", msg, sep='')
+	else:
+		print(round(t, 1))
 
 @define_frame
 class MyFrame(Frame):
@@ -88,12 +91,28 @@ class Tests (unittest.TestCase):
 		run(main)
 		self.assertEqual(sys.stdout.getvalue(), '0.1: 1\n')
 
-	def test_foo(self):
+	def test_frame_result(self):
 		@MyFrame
 		async def main():
 			print(await wait(0.1, '1'))
 		run(main)
 		self.assertEqual(sys.stdout.getvalue(), '0.1: 1\nsome result\n')
+	
+	def test_blocking_sleep(self):
+		@MyFrame
+		async def main():
+			print((await sleep(0.1)).args)
+			log()
+		run(main)
+		self.assertEqual(sys.stdout.getvalue(), 'None\n0.1\n')
+	
+	def test_non_blocking_sleep(self):
+		@MyFrame
+		async def main():
+			print((await sleep(0)).args)
+			log()
+		run(main)
+		self.assertEqual(sys.stdout.getvalue(), 'None\n0.0\n')
 
 	def test_staticmethod(self):
 		@MyFrame

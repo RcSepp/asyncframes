@@ -1,4 +1,4 @@
-from asyncframes import Awaitable
+from asyncframes import Awaitable, Event
 
 pressed = set()
 
@@ -14,11 +14,12 @@ class Key(Awaitable):
 class AnyKey(Key):
 	def __init__(self):
 		super().__init__('any')
-	def __await__(self):
-		msg = yield(self) #TODO: Value sended by yield (self) not required
-		while not isinstance(msg, Key):
-			msg = yield(self) #TODO: Value sended by yield (self) not required
-		return msg
+	def step(self, msg=None):
+		if msg and isinstance(msg.receiver, Key):
+			stop = StopIteration()
+			stop.value = msg
+			raise stop
+		return self #TODO: Return value "self" not required
 
 escape = Key('escape')
 enter = Key('enter')
@@ -28,13 +29,13 @@ up = Key('up')
 down = Key('down')
 anykey = AnyKey()
 
-def onkeydown(key):
+def onkeydown(key, eventsender, eventargs):
 	key.isdown = True
 	key.ispressed = True
 	pressed.add(key)
-	key.raise_event()
+	Event(eventsender, key, eventargs).post()
 
-def onkeyup(key):
+def onkeyup(key, eventsender, eventargs):
 	key.isdown = False
 
 def onupdate():
@@ -48,5 +49,5 @@ if __name__ == "__main__":
 	import keys
 	@WFrame
 	async def main():
-		print(await keys.anykey)
+		print((await keys.anykey).receiver)
 	run(main)
