@@ -35,7 +35,10 @@ async def wait(seconds, name):
 
 class Tests (unittest.TestCase):
 	def setUp(self):
-		QApplication.instance() or QApplication(sys.argv)
+		@MyFrame
+		async def emptyframe():
+			pass
+		run(emptyframe)
 		self.held, sys.stdout = sys.stdout, io.StringIO()
 
 		global starttime
