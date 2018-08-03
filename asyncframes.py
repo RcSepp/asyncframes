@@ -1,9 +1,20 @@
 import collections.abc
 import inspect
+import logging
 import sys
 import traceback
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QTimer
+
+
+log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG)
+
+loghandler = logging.StreamHandler(sys.stdout)
+loghandler.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(message)s")#('%(relativeCreated)d - %(name)s - %(levelname)s - %(message)s')
+loghandler.setFormatter(formatter)
+log.addHandler(loghandler)
 
 
 class Awaitable(collections.abc.Awaitable):
@@ -15,6 +26,8 @@ class Awaitable(collections.abc.Awaitable):
 	def remove(self):
 		pass
 	def __str__(self):
+		return self.__name__
+	def __repr__(self):
 		return self.__name__
 	def __await__(self):
 		msg = None
@@ -42,13 +55,17 @@ class Event():
 		self.receiver = receiver
 		self.args = args
 
+	def __str__(self):
+		return str(self.receiver)
+
 	def post(self):
+		log.debug("Posting {}".format(self))
 		try:
 			awaitable = MAIN_FRAME.step(self)
-			print("Awaiting {}".format(awaitable))
 		except StopIteration:
 			QApplication.instance().exit()
 			return False
+		log.debug("Awaiting (active) {}".format(awaitable))
 		return True
 
 class all_(Awaitable):
@@ -217,9 +234,12 @@ class Frame(Awaitable):
 		for child in self._children:
 			if child != self._activechild:
 				try:
-					child.step(msg)
-				except StopIteration:
-					pass # Ignore child-frame-done exception, because child removes itself from self._children
+					awaitable = child.step(msg)
+				except StopIteration as stop:
+					child.remove()
+					pass
+				else:
+					log.debug("Awaiting (passive) {}".format(awaitable))
 
 		# Return iteration result of active child frame
 		return result
@@ -265,7 +285,7 @@ def run(mainframe):
 		try:
 			qt.exec_()
 		except:
-			print(traceback.format_exc())
+			logging.exception(traceback.format_exc())
 
 
 class Primitive(object):
