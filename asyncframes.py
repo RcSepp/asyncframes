@@ -175,12 +175,20 @@ class Frame(Awaitable):
 		self._primitives = []
 
 	def create(self, framefunc, *frameargs, **framekwargs):
-		#self._framefunc = framefunc
+		self._removed = False
+		
+		# Activate self
+		Frame._current = self
 
 		hasself = 'self' in inspect.signature(framefunc).parameters
 		self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
 
+		# Actiivate parent
+		Frame._current = self._parent
+
 	def step(self, msg=None):
+		if self._removed:
+			raise StopIteration()
 		if self._generator is None:
 			return None
 
@@ -195,7 +203,7 @@ class Frame(Awaitable):
 			Frame._current = self._parent # Actiivate parent
 			raise
 
-		# Actiivate parent
+		# Activate parent
 		Frame._current = self._parent
 
 		# Advance passive child frames
@@ -210,16 +218,17 @@ class Frame(Awaitable):
 		return result
 
 	def remove(self):
-		if self._generator:
-			self._generator.close()
-			self._generator = None
-		while self._children:
-			self._children[-1].remove()
-		if self._parent:
-			self._parent._children.remove(self)
-		while self._primitives:
-			self._primitives[-1].remove()
-		#del self
+		if not self._removed:
+			self._removed = True
+			if self._generator:
+				self._generator.close()
+				self._generator = None
+			while self._children:
+				self._children[-1].remove()
+			if self._parent:
+				self._parent._children.remove(self)
+			while self._primitives:
+				self._primitives[-1].remove()
 
 
 
