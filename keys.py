@@ -4,12 +4,10 @@ pressed = set()
 
 class Key(Awaitable):
 	def __init__(self, name):
-		super().__init__()
+		super().__init__(name + " key")
 		self.name = name
 		self.isdown = False
 		self.ispressed = False
-	def __str__(self):
-		return self.name + " key"
 
 class AnyKey(Key):
 	def __init__(self):
@@ -49,5 +47,5 @@ if __name__ == "__main__":
 	import keys
 	@WFrame
 	async def main():
-		print((await keys.anykey).receiver)
+		print(str((await keys.anykey).receiver) + " pressed")
 	run(main)

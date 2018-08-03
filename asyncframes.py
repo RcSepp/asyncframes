@@ -7,12 +7,15 @@ from PyQt5.QtCore import QTimer
 
 
 class Awaitable(collections.abc.Awaitable):
-	def __init__(self, signal=None, signal_sender=None):
+	def __init__(self, name, signal=None, signal_sender=None):
+		self.__name__ = name
 		self._parent = None
 		if signal:
 			signal.connect(lambda e: Event(signal_sender, self, e).post())
 	def remove(self):
 		pass
+	def __str__(self):
+		return self.__name__
 	def __await__(self):
 		msg = None
 		while True:
@@ -41,7 +44,8 @@ class Event():
 
 	def post(self):
 		try:
-			MAIN_FRAME.step(self)
+			awaitable = MAIN_FRAME.step(self)
+			print("Awaiting {}".format(awaitable))
 		except StopIteration:
 			QApplication.instance().exit()
 			return False
@@ -49,7 +53,7 @@ class Event():
 
 class all_(Awaitable):
 	def __init__(self, *awaitables):
-		super().__init__()
+		super().__init__("all({})".format(", ".join(str(a) for a in awaitables)))
 
 		self._parent = Frame._current
 		if self._parent:
@@ -72,7 +76,7 @@ class all_(Awaitable):
 				self.results[child] = stop.value
 
 		if self._children: # If some children aren't finished yet
-			return None
+			return self
 		else: # If all children finished and removed themselves from self._children
 			stop = StopIteration()
 			stop.value = self.results.values()
@@ -87,7 +91,7 @@ class all_(Awaitable):
 
 class any_(Awaitable):
 	def __init__(self, *awaitables):
-		super().__init__()
+		super().__init__("any({})".format(", ".join(str(a) for a in awaitables)))
 
 		self._parent = Frame._current
 		if self._parent:
@@ -107,7 +111,7 @@ class any_(Awaitable):
 			child.step(msg)
 		
 		# If no child raised StopIteration
-		return None
+		return self
 
 	def remove(self):
 		for child in self._children:
@@ -119,7 +123,7 @@ class any_(Awaitable):
 
 class sleep(Awaitable):
 	def __init__(self, seconds=0.0):
-		super().__init__()
+		super().__init__("sleep({})".format(seconds))
 		self.non_blocking = seconds <= 0.0
 		if not self.non_blocking:
 			QTimer.singleShot(1000 * seconds, lambda: Event(None, self, None).post())
@@ -135,6 +139,8 @@ class sleep(Awaitable):
 		return self #TODO: Return value "self" not required
 
 class hold(Awaitable):
+	def __init__(self, seconds=0.0):
+		super().__init__("hold()")
 	def step(self, msg=None):
 		pass # hold can't be raised
 		return self #TODO: Return value "self" not required
@@ -165,7 +171,7 @@ class Frame(Awaitable):
 			return ___new__
 
 	def __init__(self):
-		super().__init__()
+		super().__init__(self.__class__.__name__)
 		self._parent = Frame._current
 		if self._parent:
 			self._parent._children.append(self)
@@ -175,6 +181,7 @@ class Frame(Awaitable):
 		self._primitives = []
 
 	def create(self, framefunc, *frameargs, **framekwargs):
+		self.__name__ += ' ' + framefunc.__name__
 		self._removed = False
 		
 		# Activate self
@@ -190,7 +197,7 @@ class Frame(Awaitable):
 		if self._removed:
 			raise StopIteration()
 		if self._generator is None:
-			return None
+			return self
 
 		# Activate self
 		Frame._current = self
@@ -241,14 +248,6 @@ def define_frame(*defineframeargs, **defineframekwargs):
 		return lambda frameclass: frameclass
 
 
-def update(awaitable=None):
-	try:
-		MAIN_FRAME.step(awaitable)
-	except StopIteration:
-		QApplication.instance().exit()
-		return False
-	return True
-
 def run(mainframe):
 	global MAIN_FRAME
 	qt = QApplication.instance() or QApplication(sys.argv)
@@ -262,7 +261,7 @@ def run(mainframe):
 
 	Frame._current = None
 	MAIN_FRAME = mainframe()
-	if update():
+	if Event.post(None):
 		try:
 			qt.exec_()
 		except:
