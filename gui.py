@@ -2,8 +2,8 @@ import abc
 from enum import Enum
 from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import QWidget, QMainWindow, QLayout, QHBoxLayout, QVBoxLayout
-from PyQt5.QtCore import QObject
-from asyncframes import run, define_frame, Awaitable, Event, Frame, Primitive, hold, any_
+from PyQt5.QtCore import QObject, Qt
+from asyncframes import run, define_frame, Awaitable, Event, Frame, Primitive, hold, sleep, any_
 import keys
 
 class Layout(Enum):
@@ -25,7 +25,7 @@ class WLFrame(Frame):
 
 		if layout is None: # If this frame doesn't use a layout
 			self.layout = None
-			if self._wparent is None: # If this frame is a window without a layout
+			if isinstance(self, WFrame): # If this frame is a window without a layout
 				self.widget = QWidget()
 			elif self._wparent.layout is not None: # If this frame is a panel without a layout inside a panel or window with a layout
 				self.widget = QWidget(self._wparent.widget)
@@ -34,7 +34,7 @@ class WLFrame(Frame):
 				self.widget = self._wparent.widget
 		else: # If this frame uses a layout
 			self.layout = layout.value()
-			if self._wparent is None: # If this frame is a window with a layout
+			if isinstance(self, WFrame): # If this frame is a window with a layout
 				self.widget = QWidget()
 				self.widget.setLayout(self.layout)
 			elif self._wparent.layout is not None: # If this frame is a panel with a layout inside a panel or window with a layout
@@ -45,9 +45,11 @@ class WLFrame(Frame):
 				self.widget.setLayout(self.layout)
 				self.widget.show()
 
-		if size and self._wparent is not None: # If this frame is a panel and size is defined
+		if size and not isinstance(self, WFrame): # If this frame is a panel and size is defined
 			#self.widget.setGeometry(300, 300, *size)
 			self.widget.resize(*size)
+		if self._wparent and isinstance(self, WFrame): # If this frame is a window with a parent WLFrame
+			self.setWindowModality(Qt.ApplicationModal) # Disable the parent window while this window is open
 
 	def remove(self):
 		# Find parent frame of type WLFrame -> self._wparent
@@ -64,9 +66,8 @@ class WLFrame(Frame):
 @define_frame(123)
 class WFrame(WLFrame, QMainWindow, metaclass=WFrameMeta):
 	def __init__(self, size=None, title=None, layout=None):
-		super().__init__(layout, size)
-
 		QMainWindow.__init__(self)
+		super().__init__(layout, size)
 		if size:
 			#self.setGeometry(300, 300, *size)
 			self.resize(*size)
@@ -74,6 +75,11 @@ class WFrame(WLFrame, QMainWindow, metaclass=WFrameMeta):
 			self.setWindowTitle(title)
 		self.setCentralWidget(self.widget)
 		self.show()
+		self.closed = Awaitable()
+
+	def closeEvent(self, event):
+		self.remove()
+		Event(self, self.closed, event).post()
 
 	_keymap = {
 		16777216: keys.escape,
@@ -157,12 +163,12 @@ if __name__ == "__main__":
 	# 	ProgressBar()
 	# 	await hold()
 
-	@WFrame(layout=Layout.hbox)
+	@WFrame(layout=Layout.hbox, title="hbox")
 	def hbox_window():
 		ProgressBar()
 		ProgressBar()
 
-	@WFrame(layout=Layout.vbox)
+	@WFrame(layout=Layout.vbox, title="vbox")
 	def vbox_window():
 		ProgressBar()
 		ProgressBar()
@@ -173,9 +179,11 @@ if __name__ == "__main__":
 			Button('hbox'),
 			Button('vbox')
 		]
-		layout = (await any_(*[button.click for button in buttons])).sender.text
-		if layout == 'hbox': hbox_window()
-		elif layout == 'vbox': hbox_window()
-		await hold()
+		
+		while True:
+			layout = (await any_(*[button.click for button in buttons])).sender.text
+			if layout == 'hbox': child_window = hbox_window()
+			elif layout == 'vbox': child_window = vbox_window()
+			await child_window
 
 	run(main)
