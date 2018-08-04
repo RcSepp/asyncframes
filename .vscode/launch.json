@@ -9,6 +9,9 @@
 			"type": "python",
 			"request": "launch",
 			"cwd": "${workspaceFolder}",
+			"env": {
+				"PYTHONPATH": "${workspaceFolder}"
+			},
 			"program": "${file}"
 		},
 		{
