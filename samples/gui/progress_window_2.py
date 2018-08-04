@@ -1,6 +1,11 @@
+import enum
 from asyncframes import run, Frame, sleep, Awaitable, Event
 from gui import WFrame, Layout
 from gui.widgets import Button, ProgressBar
+
+class DialogResult(enum.Enum):
+	finished = enum.auto()
+	canceled = enum.auto()
 
 @Frame
 async def main():
@@ -10,7 +15,7 @@ async def main():
 	await sleep() #await (lambda: hasattr(p, 'progress')) #TODO
 
 	# Show a wframe to monitor progress and wait until it finishes
-	await dialog(p)
+	print("Dialog result:", await dialog(p))
 
 	# If the process hasn't finished already, destroy it manually
 	# Note: This function isn't necessary here, since any frame is automatically removed when it goes out of scope.
@@ -39,6 +44,7 @@ async def monitor_progress(p, pb):
 	"""
 	while pb.value < 100:
 		pb.value = max(0, min(100, (await p.progress).args))
+	return DialogResult.finished
 
 @WFrame(size=(400, 50), layout=Layout.hbox)
 async def dialog(p):
@@ -51,8 +57,9 @@ async def dialog(p):
 	cmd_cancel = Button("Cancel")
 
 	# Wait until either monitor_progress finishes or cmd_cancel is clicked
-	await (monitor_progress(p, pg_progress) | cmd_cancel.click)
+	event = await (monitor_progress(p, pg_progress) | cmd_cancel.click)
 
 	# Close dialog
+	return DialogResult.finished if event == DialogResult.finished else DialogResult.canceled
 
 run(main)
