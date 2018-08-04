@@ -17,7 +17,7 @@ class AnyKey(Key):
 			stop = StopIteration()
 			stop.value = msg
 			raise stop
-		return self #TODO: Return value "self" not required
+		return self
 
 escape = Key('escape')
 enter = Key('enter')

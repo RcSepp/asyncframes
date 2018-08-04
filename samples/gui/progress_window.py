@@ -1,8 +1,6 @@
-import os.path
-import sys
-sys.path.append(os.path.realpath('.'))
 from asyncframes import run, Frame, sleep
-from gui import WFrame, Button, ProgressBar, Layout
+from gui import WFrame, Layout
+from gui.widgets import Button, ProgressBar
 
 @Frame
 async def main():
@@ -53,7 +51,7 @@ async def dialog(p):
 	cmd_cancel = Button("Cancel")
 
 	# Wait until either monitor_progress finishes or cmd_cancel is clicked
-	await monitor_progress(p, pg_progress) #await (monitor_progress(p, pg_progress) | cmd_cancel.click) #TODO
+	await (monitor_progress(p, pg_progress) | cmd_cancel.click)
 
 	# Close dialog
 

@@ -8,7 +8,9 @@ from PyQt5.QtCore import QTimer
 
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+if False:
+	log.setLevel(logging.DEBUG)
+
 
 loghandler = logging.StreamHandler(sys.stdout)
 loghandler.setLevel(logging.DEBUG)
@@ -43,7 +45,7 @@ class Awaitable(collections.abc.Awaitable):
 			stop = StopIteration()
 			stop.value = msg
 			raise stop
-		return self #TODO: Return value "self" not required
+		return self
 	def __and__(self, other):
 		return all_(self, other)
 	def __or__(self, other):
@@ -140,27 +142,23 @@ class any_(Awaitable):
 
 class sleep(Awaitable):
 	def __init__(self, seconds=0.0):
+		if seconds < 0:
+			raise ValueError()
 		super().__init__("sleep({})".format(seconds))
-		self.non_blocking = seconds <= 0.0
-		if not self.non_blocking:
-			QTimer.singleShot(1000 * seconds, lambda: Event(None, self, None).post())
+		QTimer.singleShot(1000 * seconds, lambda: Event(None, self, None).post())
 	def step(self, msg=None):
-		if self.non_blocking:
-			stop = StopIteration()
-			stop.value = Event(None, self, None)
-			raise stop
-		if (msg and msg.receiver == self) or self.non_blocking:
+		if msg and msg.receiver == self:
 			stop = StopIteration()
 			stop.value = msg
 			raise stop
-		return self #TODO: Return value "self" not required
+		return self
 
 class hold(Awaitable):
 	def __init__(self, seconds=0.0):
 		super().__init__("hold()")
 	def step(self, msg=None):
 		pass # hold can't be raised
-		return self #TODO: Return value "self" not required
+		return self
 
 # @types.coroutine
 # def sleep(seconds):
