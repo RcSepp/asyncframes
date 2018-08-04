@@ -256,6 +256,23 @@ class Frame(Awaitable):
 	def remove(self):
 		if not self._removed:
 			self._removed = True
+
+			# Remove child frames
+			while self._children:
+				self._children[-1].remove()
+
+			# Remove self from parent frame
+			if self._parent:
+				self._parent._children.remove(self)
+
+			# Remove primitives
+			while self._primitives:
+				self._primitives[-1].remove()
+
+			# Post frame removed event
+			Event(self, self, None).post()
+			
+			# Stop framefunc
 			if self._generator: # If framefunc is a coroutine
 				if self._generator.cr_running:
 					# Calling coroutine.close() from within the coroutine is illegal, so we throw a GeneratorExit manually instead
@@ -266,13 +283,6 @@ class Frame(Awaitable):
 					self._generator = None
 			else: # If framefunc is a regular function
 				raise GeneratorExit() # Raise exception to stop execution
-			while self._children:
-				self._children[-1].remove()
-			if self._parent:
-				self._parent._children.remove(self)
-			while self._primitives:
-				self._primitives[-1].remove()
-			Event(self, self, None).post() # Post frame removed event
 
 
 
