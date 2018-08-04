@@ -41,7 +41,7 @@ class Awaitable(collections.abc.Awaitable):
 			except StopIteration as stop:
 				return stop.value
 	def step(self, msg=None):
-		if msg and msg.receiver == self:
+		if msg and msg.target == self:
 			stop = StopIteration()
 			stop.value = msg
 			raise stop
@@ -52,13 +52,13 @@ class Awaitable(collections.abc.Awaitable):
 		return any_(self, other)
 
 class Event():
-	def __init__(self, sender, receiver, args):
+	def __init__(self, sender, target, args):
 		self.sender = sender
-		self.receiver = receiver
+		self.target = target
 		self.args = args
 
 	def __str__(self):
-		return str(self.receiver)
+		return str(self.target)
 
 	def post(self):
 		log.debug("Posting {}".format(self))
@@ -147,7 +147,7 @@ class sleep(Awaitable):
 		super().__init__("sleep({})".format(seconds))
 		QTimer.singleShot(1000 * seconds, lambda: Event(None, self, None).post())
 	def step(self, msg=None):
-		if msg and msg.receiver == self:
+		if msg and msg.target == self:
 			stop = StopIteration()
 			stop.value = msg
 			raise stop

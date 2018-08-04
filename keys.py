@@ -13,7 +13,7 @@ class AnyKey(Key):
 	def __init__(self):
 		super().__init__('any')
 	def step(self, msg=None):
-		if msg and isinstance(msg.receiver, Key):
+		if msg and isinstance(msg.target, Key):
 			stop = StopIteration()
 			stop.value = msg
 			raise stop
@@ -47,5 +47,5 @@ if __name__ == "__main__":
 	import keys
 	@WFrame
 	async def main():
-		print(str((await keys.anykey).receiver) + " pressed")
+		print(str((await keys.anykey).target) + " pressed")
 	run(main)
