@@ -40,6 +40,8 @@ class Awaitable(collections.abc.Awaitable):
 				msg = yield(self.step(msg))
 			except StopIteration as stop:
 				return stop.value
+			except GeneratorExit:
+				return None
 	def step(self, msg=None):
 		if msg and msg.target == self:
 			stop = StopIteration()
@@ -67,10 +69,10 @@ class Event():
 		log.debug("Processing event {}".format(self))
 		try:
 			awaitable = MAIN_FRAME.step(self)
-		except StopIteration:
+		except (StopIteration, GeneratorExit):
 			QApplication.instance().exit()
 			return False
-		log.debug("Awaiting active frame {}".format(awaitable))
+		log.debug("Awaiting active awaitable {}".format(awaitable))
 		return True
 
 class all_(Awaitable):
@@ -96,6 +98,8 @@ class all_(Awaitable):
 				self.results[child] = child.step(msg)
 			except StopIteration as stop:
 				self.results[child] = stop.value
+			except GeneratorExit:
+				self.results[child] = None
 
 		if self._children: # If some children aren't finished yet
 			return self
@@ -199,16 +203,20 @@ class Frame(Awaitable):
 		self._primitives = []
 
 	def create(self, framefunc, *frameargs, **framekwargs):
-		self.__name__ += ' ' + framefunc.__name__
+		self.__name__ = framefunc.__name__
 		self._removed = False
 		
 		# Activate self
 		Frame._current = self
 
 		hasself = 'self' in inspect.signature(framefunc).parameters
-		self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
+		self._generator = None # Define generator in case self.remove() is called within framefunc()
+		try:
+			self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
+		except GeneratorExit: # If framefunc is a regular function that called self.remove()
+			pass # The function exited prematurely. No need to propagate exception
 
-		# Actiivate parent
+		# Activate parent
 		Frame._current = self._parent
 
 	def step(self, msg=None):
@@ -223,7 +231,7 @@ class Frame(Awaitable):
 		# Advance generator
 		try:
 			result = self._generator.send(None if self._generator.cr_await is None else msg)
-		except StopIteration: # If done
+		except (StopIteration, GeneratorExit): # If done
 			Frame._current = self._parent # Activate parent
 			self.remove()
 			raise
@@ -236,11 +244,11 @@ class Frame(Awaitable):
 			if child != self._activechild:
 				try:
 					awaitable = child.step(msg)
-				except StopIteration as stop:
+				except (StopIteration, GeneratorExit):
 					child.remove()
 					pass
 				else:
-					log.debug("Awaiting passive frame {}".format(awaitable))
+					log.debug("Awaiting passive awaitable {}".format(awaitable))
 
 		# Return iteration result of active child frame
 		return result
@@ -248,9 +256,16 @@ class Frame(Awaitable):
 	def remove(self):
 		if not self._removed:
 			self._removed = True
-			if self._generator:
-				self._generator.close()
-				self._generator = None
+			if self._generator: # If framefunc is a coroutine
+				if self._generator.cr_running:
+					# Calling coroutine.close() from within the coroutine is illegal, so we throw a GeneratorExit manually instead
+					self._generator = None
+					raise GeneratorExit()
+				else:
+					self._generator.close()
+					self._generator = None
+			else: # If framefunc is a regular function
+				raise GeneratorExit() # Raise exception to stop execution
 			while self._children:
 				self._children[-1].remove()
 			if self._parent:

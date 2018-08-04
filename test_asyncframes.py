@@ -231,5 +231,23 @@ class Tests (unittest.TestCase):
 		run(frame)
 		test.assertEqual(test.subframe_counter, 4)
 
+	def test_remove_self(self):
+		@Frame
+		def frame(self):
+			log.debug("1")
+			self.remove()
+			log.debug("never reached")
+		@Frame
+		async def async_frame(self):
+			log.debug("2")
+			self.remove()
+			log.debug("never reached")
+		run(frame)
+		run(async_frame)
+		self.assertLogEqual("""
+			0.0: 1
+			0.0: 2
+		""")
+
 if __name__ == "__main__":
 	unittest.main()
