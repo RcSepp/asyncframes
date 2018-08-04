@@ -199,5 +199,37 @@ class Tests (unittest.TestCase):
 		with self.assertRaises(Exception):
 			MyPrimitive()
 
+	def test_Frame_current(self):
+		test = self
+		test.subframe_counter = 0
+		@MyFrame
+		async def frame(self):
+			test.assertEqual(Frame._current, self)
+			async_subframe() # Test passive async frame
+			test.assertEqual(Frame._current, self)
+			await async_subframe() # Test active async frame
+			test.assertEqual(Frame._current, self)
+			subframe() # Test passive frame
+			test.assertEqual(Frame._current, self)
+			@Frame
+			async def remove_after(frame, seconds):
+				await sleep(seconds)
+				frame.remove()
+			sf = subframe()
+			remove_after(sf, 0.1)
+			await sf # Test active frame
+			test.assertEqual(Frame._current, self)
+		@MyFrame
+		async def async_subframe(self):
+			test.assertEqual(Frame._current, self)
+			await sleep()
+			test.subframe_counter += 1
+		@MyFrame
+		def subframe(self):
+			test.assertEqual(Frame._current, self)
+			test.subframe_counter += 1
+		run(frame)
+		test.assertEqual(test.subframe_counter, 4)
+
 if __name__ == "__main__":
 	unittest.main()

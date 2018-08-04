@@ -31,7 +31,7 @@ def onkeydown(key, eventsender, eventargs):
 	key.isdown = True
 	key.ispressed = True
 	pressed.add(key)
-	Event(eventsender, key, eventargs).post()
+	Event(eventsender, key, eventargs).process()
 
 def onkeyup(key, eventsender, eventargs):
 	key.isdown = False

@@ -21,7 +21,7 @@
 			"cwd": "${workspaceFolder}",
 			"module": "unittest",
 			"args": [
-				"test_asyncframes.Tests.test_primitive"
+				"test_asyncframes.Tests.test_Frame_current"
 			]
 		}
 	]

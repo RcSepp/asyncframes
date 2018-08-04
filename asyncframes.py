@@ -24,7 +24,7 @@ class Awaitable(collections.abc.Awaitable):
 		self.__name__ = name
 		self._parent = None
 		if signal:
-			signal.connect(lambda e: Event(signal_sender, self, e).post())
+			signal.connect(lambda e: Event(signal_sender, self, e).process())
 	def remove(self):
 		pass
 	def __str__(self):
@@ -61,13 +61,16 @@ class Event():
 		return str(self.target)
 
 	def post(self):
-		log.debug("Posting {}".format(self))
+		QTimer.singleShot(0, lambda: self.process())
+
+	def process(self):
+		log.debug("Processing event {}".format(self))
 		try:
 			awaitable = MAIN_FRAME.step(self)
 		except StopIteration:
 			QApplication.instance().exit()
 			return False
-		log.debug("Awaiting (active) {}".format(awaitable))
+		log.debug("Awaiting active frame {}".format(awaitable))
 		return True
 
 class all_(Awaitable):
@@ -145,7 +148,7 @@ class sleep(Awaitable):
 		if seconds < 0:
 			raise ValueError()
 		super().__init__("sleep({})".format(seconds))
-		QTimer.singleShot(1000 * seconds, lambda: Event(None, self, None).post())
+		QTimer.singleShot(1000 * seconds, lambda: Event(None, self, None).process())
 	def step(self, msg=None):
 		if msg and msg.target == self:
 			stop = StopIteration()
@@ -219,10 +222,10 @@ class Frame(Awaitable):
 
 		# Advance generator
 		try:
-			result = self._generator.send(msg)
+			result = self._generator.send(None if self._generator.cr_await is None else msg)
 		except StopIteration: # If done
+			Frame._current = self._parent # Activate parent
 			self.remove()
-			Frame._current = self._parent # Actiivate parent
 			raise
 
 		# Activate parent
@@ -237,7 +240,7 @@ class Frame(Awaitable):
 					child.remove()
 					pass
 				else:
-					log.debug("Awaiting (passive) {}".format(awaitable))
+					log.debug("Awaiting passive frame {}".format(awaitable))
 
 		# Return iteration result of active child frame
 		return result
@@ -254,6 +257,7 @@ class Frame(Awaitable):
 				self._parent._children.remove(self)
 			while self._primitives:
 				self._primitives[-1].remove()
+			Event(self, self, None).post() # Post frame removed event
 
 
 
@@ -279,7 +283,7 @@ def run(mainframe):
 
 	Frame._current = None
 	MAIN_FRAME = mainframe()
-	if Event.post(None):
+	if Event.process(None):
 		try:
 			qt.exec_()
 		except:
