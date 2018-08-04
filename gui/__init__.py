@@ -114,7 +114,7 @@ class WFrame(WLFrame, QMainWindow, metaclass=WFrameMeta):
 		try:
 			keys.onkeyup(WFrame._keymap[event.key()], self, event)
 		except KeyError:
-			print("Unknown keycode: " + str(event.key()))
+			pass
 
 @define_frame
 class WGFrame(WLFrame):
