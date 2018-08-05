@@ -236,17 +236,18 @@ class Tests (unittest.TestCase):
 		def frame(self):
 			log.debug("1")
 			self.remove()
-			log.debug("never reached")
+			log.debug("2") # Frame.remove() doesn't interrupt regular frame functions
 		@Frame
 		async def async_frame(self):
-			log.debug("2")
+			log.debug("3")
 			self.remove()
-			log.debug("never reached")
+			log.debug("never reached") # Frame.remove() interrupts async frame functions
 		run(frame)
 		run(async_frame)
 		self.assertLogEqual("""
 			0.0: 1
 			0.0: 2
+			0.0: 3
 		""")
 
 if __name__ == "__main__":

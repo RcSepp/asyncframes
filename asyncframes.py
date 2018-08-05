@@ -24,7 +24,7 @@ class Awaitable(collections.abc.Awaitable):
 		self.__name__ = name
 		self._parent = None
 		if signal:
-			signal.connect(lambda e: Event(signal_sender, self, e).process())
+			signal.connect(lambda e=None: Event(signal_sender, self, e).process())
 	def remove(self):
 		pass
 	def __str__(self):
@@ -211,10 +211,7 @@ class Frame(Awaitable):
 
 		hasself = 'self' in inspect.signature(framefunc).parameters
 		self._generator = None # Define generator in case self.remove() is called within framefunc()
-		try:
-			self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
-		except GeneratorExit: # If framefunc is a regular function that called self.remove()
-			pass # The function exited prematurely. No need to propagate exception
+		self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
 
 		# Activate parent
 		Frame._current = self._parent
@@ -281,8 +278,6 @@ class Frame(Awaitable):
 				else:
 					self._generator.close()
 					self._generator = None
-			else: # If framefunc is a regular function
-				raise GeneratorExit() # Raise exception to stop execution
 
 
 
