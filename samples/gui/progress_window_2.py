@@ -1,7 +1,8 @@
 import enum
 from asyncframes import run, Frame, sleep, Awaitable, Event
 from gui import WFrame, Layout
-from gui.widgets import Button, ProgressBar
+from gui.widgets import Button, ProgressBar, enable_widget_properties
+enable_widget_properties()
 
 class DialogResult(enum.Enum):
 	finished = enum.auto()

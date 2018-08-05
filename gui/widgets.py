@@ -1,30 +1,6 @@
-import re
 from PyQt5 import QtWidgets, QtCore
 from asyncframes import Awaitable, Primitive, hold, sleep, any_
 from gui import WLFrame
-
-def _create_properties(src, dest):
-	"""
-	Substitude getter/setter pairs with Python properties
-
-	Find callable attributes of the form 'foo' (getter) and 'setFoo' (setter) in class src and replace them with properties in class dest.
-	"""
-	setters = {}
-	setter_regex = re.compile(r"set[A-Z]\w*")
-	for key in dir(src):
-		try:
-			setter = getattr(src, key)
-		except TypeError:
-			continue
-		if callable(setter) and setter_regex.match(key):
-			setters[key[3].lower() + key[4:]] = setter
-	for key in dir(src):
-		try:
-			getter = getattr(src, key)
-		except TypeError:
-			continue
-		if callable(getter) and key in setters:
-			setattr(dest, key, property(getter, setters[key])) # Overwrite getter with property
 
 class Widget(Primitive):
 	def __init__(self):
@@ -68,7 +44,6 @@ class Label(Widget, QtWidgets.QLabel):
 		QtWidgets.QLabel.__init__(self, text, self._owner.widget)
 		self._convert_all_signals_to_awaitables()
 		self._show(pos, row, col, rowspan, colspan)
-_create_properties(QtWidgets.QLabel, Label)
 
 class Button(Widget, QtWidgets.QPushButton):
 	def __init__(self, text="Button", pos=None, row=None, col=None, rowspan=1, colspan=1):
@@ -76,7 +51,6 @@ class Button(Widget, QtWidgets.QPushButton):
 		QtWidgets.QPushButton.__init__(self, text, self._owner.widget)
 		self._convert_all_signals_to_awaitables()
 		self._show(pos, row, col, rowspan, colspan)
-_create_properties(QtWidgets.QPushButton, Button)
 
 class ProgressBar(Widget, QtWidgets.QProgressBar):
 	def __init__(self, pos=None, row=None, col=None, rowspan=1, colspan=1):
@@ -84,19 +58,55 @@ class ProgressBar(Widget, QtWidgets.QProgressBar):
 		QtWidgets.QProgressBar.__init__(self, self._owner.widget)
 		self._convert_all_signals_to_awaitables()
 		self._show(pos, row, col, rowspan, colspan)
-_create_properties(QtWidgets.QProgressBar, ProgressBar)
 
 class Action(Widget, QtWidgets.QAction):
 	def __init__(self, text):
 		super().__init__()
 		QtWidgets.QAction.__init__(self, text, self._owner.widget)
 		self._convert_all_signals_to_awaitables()
-_create_properties(QtWidgets.QAction, Action)
+
+
+def enable_widget_properties():
+	import inspect
+	import re
+	import sys
+	
+	def create_properties(src, dest):
+		"""
+		Substitute getter/setter pairs with Python properties
+
+		Find callable attributes of the form 'foo' (getter) and 'setFoo' (setter) in class src and replace them with properties in class dest.
+		"""
+		setters = {}
+		setter_regex = re.compile(r"set[A-Z]\w*")
+		for key in dir(src):
+			try:
+				setter = getattr(src, key)
+			except TypeError:
+				continue
+			if callable(setter) and setter_regex.match(key):
+				setters[key[3].lower() + key[4:]] = setter
+		for key in dir(src):
+			try:
+				getter = getattr(src, key)
+			except TypeError:
+				continue
+			if callable(getter) and key in setters:
+				setattr(dest, key, property(getter, setters[key])) # Overwrite getter with property
+	
+	for clsname, cls in inspect.getmembers(sys.modules[__name__], inspect.isclass): # For each class in current module
+		if cls != Widget and issubclass(cls, Widget): # If class is subclass of Widget
+			for basecls in inspect.getmro(cls): # For each class in inheritance hierarchy of cls
+				if basecls != Widget and basecls != cls and issubclass(basecls, QtCore.QObject): # Find highest base class that inherits from QObject
+					create_properties(basecls, cls) # Substitute getter/setter pairs of basecls with Python properties in cls
+					break
 
 
 if __name__ == "__main__":
 	from asyncframes import run, hold, sleep, any_
 	from gui import WFrame, WGFrame, Layout
+
+	enable_widget_properties()
 
 	@WFrame(layout=Layout.hbox, title="group box")
 	def groupbox_window():

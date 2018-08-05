@@ -1,6 +1,7 @@
 from asyncframes import run, Frame, sleep
 from gui import WFrame, Layout
-from gui.widgets import Button, ProgressBar
+from gui.widgets import Button, ProgressBar, enable_widget_properties
+enable_widget_properties()
 
 @Frame
 async def main():
