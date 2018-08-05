@@ -1,4 +1,4 @@
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtCore
 from asyncframes import Awaitable, Primitive, hold, sleep, any_
 from gui import WLFrame
 
@@ -7,64 +7,76 @@ class Widget(Primitive):
 		super().__init__(WLFrame)
 
 	def _show(self, pos, row, col, rowspan, colspan):
-		self.qtwidget.resize(self.qtwidget.sizeHint())
-		if pos is not None: self.qtwidget.move(pos.x, pos.y)
+		self.resize(self.sizeHint())
+		if pos is not None: self.move(pos.x, pos.y)
 		if self._owner.layout is not None:
 			if isinstance(self._owner.layout, QtWidgets.QGridLayout):
 				if row is not None and col is not None:
-					self._owner.layout.addWidget(self.qtwidget, row, col, rowspan, colspan)
+					self._owner.layout.addWidget(self, row, col, rowspan, colspan)
 				else:
-					self._owner.layout.addWidget(self.qtwidget)
+					self._owner.layout.addWidget(self)
 			else:
-				self._owner.layout.addWidget(self.qtwidget)
-		self.qtwidget.show()
+				self._owner.layout.addWidget(self)
+		self.show()
 
 	def remove(self):
 		if self._owner.layout is not None:
-			self._owner.layout.removeWidget(self.qtwidget)
-		self.qtwidget.setParent(None)
-		self.qtwidget.deleteLater()
+			self._owner.layout.removeWidget(self)
+		self.setParent(None)
+		self.deleteLater()
 		super().remove()
 
-class Label(Widget):
+class Label(Widget, QtWidgets.QLabel):
 	def __init__(self, text="Label", pos=None, row=None, col=None, rowspan=1, colspan=1):
 		super().__init__()
-		self.qtwidget = QtWidgets.QLabel(text, self._owner.widget)
+		QtWidgets.QLabel.__init__(self, text, self._owner.widget)
 		self._show(pos, row, col, rowspan, colspan)
 	
 	@property
 	def text(self):
-		return self.qtwidget.text()
+		return QtWidgets.QLabel.text(self)
 	@text.setter
 	def text(self, value):
-		self.qtwidget.setText(value)
+		QtWidgets.QLabel.setText(self, value)
 
-class Button(Widget):
+class Button(Widget, QtWidgets.QPushButton):
 	def __init__(self, text="Button", pos=None, row=None, col=None, rowspan=1, colspan=1):
 		super().__init__()
-		self.qtwidget = QtWidgets.QPushButton(text, self._owner.widget)
-		self.click = Awaitable("Button.click", self.qtwidget.clicked, self)
+		QtWidgets.QPushButton.__init__(self, text, self._owner.widget)
+		self.click = Awaitable("Button.click", self.clicked, self)
 		self._show(pos, row, col, rowspan, colspan)
 	
 	@property
 	def text(self):
-		return self.qtwidget.text()
+		return QtWidgets.QPushButton.text(self)
 	@text.setter
 	def text(self, value):
-		self.qtwidget.setText(value)
+		QtWidgets.QPushButton.setText(self, value)
 
-class ProgressBar(Widget):
+class ProgressBar(Widget, QtWidgets.QProgressBar):
 	def __init__(self, pos=None, row=None, col=None, rowspan=1, colspan=1):
 		super().__init__()
-		self.qtwidget = QtWidgets.QProgressBar(self._owner.widget)
+		QtWidgets.QProgressBar.__init__(self, self._owner.widget)
 		self._show(pos, row, col, rowspan, colspan)
 
 	@property
 	def value(self):
-		return self.qtwidget.value()
+		return QtWidgets.QProgressBar.value(self)
 	@value.setter
 	def value(self, value):
-		return self.qtwidget.setValue(value)
+		return QtWidgets.QProgressBar.setValue(self, value)
+
+class Action(Widget, QtWidgets.QAction):
+	def __init__(self, text):
+		super().__init__()
+		QtWidgets.QAction.__init__(self)
+		self.setText(text)
+		self.setParent(self._owner.widget)
+		
+		for key in dir(self):
+			if type(getattr(self, key)) == QtCore.pyqtBoundSignal:
+				print(key)
+				setattr(self, key, Awaitable("{}.{}".format(self.__class__.__name__, key), getattr(self, key), self))
 
 
 if __name__ == "__main__":
