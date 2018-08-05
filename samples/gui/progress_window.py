@@ -51,7 +51,7 @@ async def dialog(p):
 	cmd_cancel = Button("Cancel")
 
 	# Wait until either monitor_progress finishes or cmd_cancel is clicked
-	await (monitor_progress(p, pg_progress) | cmd_cancel.click)
+	await (monitor_progress(p, pg_progress) | cmd_cancel.clicked)
 
 	# Close dialog
 

@@ -24,7 +24,7 @@ class Awaitable(collections.abc.Awaitable):
 		self.__name__ = name
 		self._parent = None
 		if signal:
-			signal.connect(lambda e=None: Event(signal_sender, self, e).process())
+			signal.connect(lambda e=None: Event(signal_sender, self, e).post())
 	def remove(self):
 		pass
 	def __str__(self):

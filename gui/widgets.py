@@ -26,10 +26,20 @@ class Widget(Primitive):
 		self.deleteLater()
 		super().remove()
 
+	def _convert_all_signals_to_awaitables(self):
+		for key in dir(self):
+			signal = getattr(self, key)
+			if type(signal) == QtCore.pyqtBoundSignal:
+				awaitable = Awaitable("{}.{}".format(self.__class__.__name__, key), signal, self)
+				awaitable.connect = signal.connect # Preserve pyqtBoundSignal.connect()
+				awaitable.emit = signal.emit # Preserve pyqtBoundSignal.emit()
+				setattr(self, key, awaitable)
+
 class Label(Widget, QtWidgets.QLabel):
 	def __init__(self, text="Label", pos=None, row=None, col=None, rowspan=1, colspan=1):
 		super().__init__()
 		QtWidgets.QLabel.__init__(self, text, self._owner.widget)
+		self._convert_all_signals_to_awaitables()
 		self._show(pos, row, col, rowspan, colspan)
 	
 	@property
@@ -43,7 +53,7 @@ class Button(Widget, QtWidgets.QPushButton):
 	def __init__(self, text="Button", pos=None, row=None, col=None, rowspan=1, colspan=1):
 		super().__init__()
 		QtWidgets.QPushButton.__init__(self, text, self._owner.widget)
-		self.click = Awaitable("Button.click", self.clicked, self)
+		self._convert_all_signals_to_awaitables()
 		self._show(pos, row, col, rowspan, colspan)
 	
 	@property
@@ -57,6 +67,7 @@ class ProgressBar(Widget, QtWidgets.QProgressBar):
 	def __init__(self, pos=None, row=None, col=None, rowspan=1, colspan=1):
 		super().__init__()
 		QtWidgets.QProgressBar.__init__(self, self._owner.widget)
+		self._convert_all_signals_to_awaitables()
 		self._show(pos, row, col, rowspan, colspan)
 
 	@property
@@ -72,11 +83,7 @@ class Action(Widget, QtWidgets.QAction):
 		QtWidgets.QAction.__init__(self)
 		self.setText(text)
 		self.setParent(self._owner.widget)
-		
-		for key in dir(self):
-			if type(getattr(self, key)) == QtCore.pyqtBoundSignal:
-				print(key)
-				setattr(self, key, Awaitable("{}.{}".format(self.__class__.__name__, key), getattr(self, key), self))
+		self._convert_all_signals_to_awaitables()
 
 
 if __name__ == "__main__":
@@ -111,7 +118,7 @@ if __name__ == "__main__":
 		}
 		
 		while True:
-			clicked_button = (await any_(*[button.click for button in examples.keys()])).sender
+			clicked_button = (await any_(*[button.clicked for button in examples.keys()])).sender
 			await examples[clicked_button]()
 
 	run(main)
