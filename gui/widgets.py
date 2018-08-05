@@ -1,10 +1,41 @@
+import re
 from PyQt5 import QtWidgets, QtCore
 from asyncframes import Awaitable, Primitive, hold, sleep, any_
 from gui import WLFrame
 
+def _create_properties(src, dest):
+	"""
+	Substitude getter/setter pairs with Python properties
+
+	Find callable attributes of the form 'foo' (getter) and 'setFoo' (setter) in class src and replace them with properties in class dest.
+	"""
+	setters = {}
+	setter_regex = re.compile(r"set[A-Z]\w*")
+	for key in dir(src):
+		try:
+			setter = getattr(src, key)
+		except TypeError:
+			continue
+		if callable(setter) and setter_regex.match(key):
+			setters[key[3].lower() + key[4:]] = setter
+	for key in dir(src):
+		try:
+			getter = getattr(src, key)
+		except TypeError:
+			continue
+		if callable(getter) and key in setters:
+			setattr(dest, key, property(getter, setters[key])) # Overwrite getter with property
+
 class Widget(Primitive):
 	def __init__(self):
 		super().__init__(WLFrame)
+
+	def remove(self):
+		if self._owner.layout is not None:
+			self._owner.layout.removeWidget(self)
+		self.setParent(None)
+		self.deleteLater()
+		super().remove()
 
 	def _show(self, pos, row, col, rowspan, colspan):
 		self.resize(self.sizeHint())
@@ -19,16 +50,12 @@ class Widget(Primitive):
 				self._owner.layout.addWidget(self)
 		self.show()
 
-	def remove(self):
-		if self._owner.layout is not None:
-			self._owner.layout.removeWidget(self)
-		self.setParent(None)
-		self.deleteLater()
-		super().remove()
-
 	def _convert_all_signals_to_awaitables(self):
-		for key in dir(self):
-			signal = getattr(self, key)
+		for key in dir(self.__class__):
+			try:
+				signal = getattr(self, key)
+			except TypeError:
+				continue
 			if type(signal) == QtCore.pyqtBoundSignal:
 				awaitable = Awaitable("{}.{}".format(self.__class__.__name__, key), signal, self)
 				awaitable.connect = signal.connect # Preserve pyqtBoundSignal.connect()
@@ -41,13 +68,7 @@ class Label(Widget, QtWidgets.QLabel):
 		QtWidgets.QLabel.__init__(self, text, self._owner.widget)
 		self._convert_all_signals_to_awaitables()
 		self._show(pos, row, col, rowspan, colspan)
-	
-	@property
-	def text(self):
-		return QtWidgets.QLabel.text(self)
-	@text.setter
-	def text(self, value):
-		QtWidgets.QLabel.setText(self, value)
+_create_properties(QtWidgets.QLabel, Label)
 
 class Button(Widget, QtWidgets.QPushButton):
 	def __init__(self, text="Button", pos=None, row=None, col=None, rowspan=1, colspan=1):
@@ -55,13 +76,7 @@ class Button(Widget, QtWidgets.QPushButton):
 		QtWidgets.QPushButton.__init__(self, text, self._owner.widget)
 		self._convert_all_signals_to_awaitables()
 		self._show(pos, row, col, rowspan, colspan)
-	
-	@property
-	def text(self):
-		return QtWidgets.QPushButton.text(self)
-	@text.setter
-	def text(self, value):
-		QtWidgets.QPushButton.setText(self, value)
+_create_properties(QtWidgets.QPushButton, Button)
 
 class ProgressBar(Widget, QtWidgets.QProgressBar):
 	def __init__(self, pos=None, row=None, col=None, rowspan=1, colspan=1):
@@ -69,21 +84,14 @@ class ProgressBar(Widget, QtWidgets.QProgressBar):
 		QtWidgets.QProgressBar.__init__(self, self._owner.widget)
 		self._convert_all_signals_to_awaitables()
 		self._show(pos, row, col, rowspan, colspan)
-
-	@property
-	def value(self):
-		return QtWidgets.QProgressBar.value(self)
-	@value.setter
-	def value(self, value):
-		return QtWidgets.QProgressBar.setValue(self, value)
+_create_properties(QtWidgets.QProgressBar, ProgressBar)
 
 class Action(Widget, QtWidgets.QAction):
 	def __init__(self, text):
 		super().__init__()
-		QtWidgets.QAction.__init__(self)
-		self.setText(text)
-		self.setParent(self._owner.widget)
+		QtWidgets.QAction.__init__(self, text, self._owner.widget)
 		self._convert_all_signals_to_awaitables()
+_create_properties(QtWidgets.QAction, Action)
 
 
 if __name__ == "__main__":
@@ -97,7 +105,6 @@ if __name__ == "__main__":
 			ProgressBar()
 			ProgressBar()
 		group_box()
-		
 
 	@WFrame(layout=Layout.hbox, title="hbox")
 	def hbox_window():
