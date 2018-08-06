@@ -1,22 +1,23 @@
+import abc
 import collections.abc
 import inspect
-import logging
-import sys
-import traceback
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import QTimer
 
 
-log = logging.getLogger(__name__)
-if False:
-	log.setLevel(logging.DEBUG)
+class EventLoop(metaclass=abc.ABCMeta):
+	_current = None
 
-
-loghandler = logging.StreamHandler(sys.stdout)
-loghandler.setLevel(logging.DEBUG)
-formatter = logging.Formatter("%(message)s")#('%(relativeCreated)d - %(name)s - %(levelname)s - %(message)s')
-loghandler.setFormatter(formatter)
-log.addHandler(loghandler)
+	@abc.abstractmethod
+	def run(self, frame):
+		raise NotImplementedError()
+	@abc.abstractmethod
+	def sendevent(self, event):
+		raise NotImplementedError()
+	@abc.abstractmethod
+	def postevent(self, event, delay=0):
+		raise NotImplementedError()
+	@abc.abstractmethod
+	def onpassiveframeprocessed(self, result): #TODO: Find better way to implement this
+		raise NotImplementedError()
 
 
 class Awaitable(collections.abc.Awaitable):
@@ -63,17 +64,10 @@ class Event():
 		return str(self.target)
 
 	def post(self):
-		QTimer.singleShot(0, lambda: self.process())
+		EventLoop._current.postevent(self)
 
 	def process(self):
-		log.debug("Processing event {}".format(self))
-		try:
-			awaitable = MAIN_FRAME.step(self)
-		except (StopIteration, GeneratorExit):
-			QApplication.instance().exit()
-			return False
-		log.debug("Awaiting active awaitable {}".format(awaitable))
-		return True
+		return EventLoop._current.sendevent(self)
 
 class all_(Awaitable):
 	def __init__(self, *awaitables):
@@ -152,7 +146,7 @@ class sleep(Awaitable):
 		if seconds < 0:
 			raise ValueError()
 		super().__init__("sleep({})".format(seconds))
-		QTimer.singleShot(1000 * seconds, lambda: Event(None, self, None).process())
+		EventLoop._current.postevent(Event(None, self, None), delay=seconds)
 	def step(self, msg=None):
 		if msg and msg.target == self:
 			stop = StopIteration()
@@ -164,13 +158,7 @@ class hold(Awaitable):
 	def __init__(self, seconds=0.0):
 		super().__init__("hold()")
 	def step(self, msg=None):
-		pass # hold can't be raised
-		return self
-
-# @types.coroutine
-# def sleep(seconds):
-# 	QTimer.singleShot(1000 * seconds, tick)
-# 	yield 123
+		return self # hold can't be raised
 
 
 class Frame(Awaitable):
@@ -245,7 +233,7 @@ class Frame(Awaitable):
 					child.remove()
 					pass
 				else:
-					log.debug("Awaiting passive awaitable {}".format(awaitable))
+					EventLoop._current.onpassiveframeprocessed(awaitable)
 
 		# Return iteration result of active child frame
 		return result
@@ -290,26 +278,6 @@ def define_frame(*defineframeargs, **defineframekwargs):
 		return lambda frameclass: frameclass
 
 
-def run(mainframe):
-	global MAIN_FRAME
-	qt = QApplication.instance() or QApplication(sys.argv)
-
-	try:
-		import qdarkstyle
-	except ImportError:
-		pass
-	else:
-		qt.setStyleSheet(qdarkstyle.load_stylesheet_pyqt5())
-
-	Frame._current = None
-	MAIN_FRAME = mainframe()
-	if Event.process(None):
-		try:
-			qt.exec_()
-		except:
-			logging.exception(traceback.format_exc())
-
-
 class Primitive(object):
 	def __init__(self, owner):
 		# Validate parameters
@@ -328,30 +296,3 @@ class Primitive(object):
 
 	def remove(self):
 		self._owner._primitives.remove(self)
-
-
-if __name__ == "__main__":
-	@define_frame
-	class MyFrame1(Frame):
-		pass
-	@define_frame
-	class MyFrame2(Frame):
-		pass
-
-	class MyPrimitive(Primitive):
-		def __init__(self):
-			super().__init__(MyFrame1)
-
-	@MyFrame1
-	async def coroutine():
-		other(0.1, '1')
-		await other(0.2, '2')
-		print('DONE')
-
-	@MyFrame2
-	async def other(seconds, name):
-		p = MyPrimitive()
-		await sleep(seconds)
-		print(name)
-
-	run(coroutine)

@@ -42,10 +42,11 @@ def onupdate():
 	pressed.clear()
 
 if __name__ == "__main__":
-	from asyncframes import run
+	from pyqt5_eventloop import EventLoop
 	from gui import WFrame
 	import keys
 	@WFrame
 	async def main():
 		print(str((await keys.anykey).target) + " pressed")
-	run(main)
+	loop = EventLoop()
+	loop.run(main)
