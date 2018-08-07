@@ -16,7 +16,7 @@ class EventLoop(metaclass=abc.ABCMeta):
 	def postevent(self, event, delay=0):
 		raise NotImplementedError()
 	@abc.abstractmethod
-	def onpassiveframeprocessed(self, result): #TODO: Find better way to implement this
+	def register_frame(self, frame, awaitable):
 		raise NotImplementedError()
 
 
@@ -38,7 +38,7 @@ class Awaitable(collections.abc.Awaitable):
 			if self._parent:
 				self._parent._activechild = self
 			try:
-				msg = yield(self.step(msg))
+				msg = yield self.step(msg)
 			except StopIteration as stop:
 				return stop.value
 			except GeneratorExit:
@@ -84,22 +84,38 @@ class all_(Awaitable):
 				child._parent._children.remove(child)
 			child._parent = self
 
-		self.results = {}
-
-	def step(self, msg=None):
+		self._results = {}
+		self._frame_register = {}
 		for child in self._children:
 			try:
-				self.results[child] = child.step(msg)
+				awaitable = child.step(None)
+			except (StopIteration, GeneratorExit):
+				raise Exception("This should never be reached, because child.step(None) should only return awaitable and not finish.")
+			else:
+				self._frame_register[awaitable] = child
+
+	def step(self, msg=None):
+		if msg is None:
+			return self._frame_register.keys()
+		try:
+			child = self._frame_register.pop(msg.target)
+		except KeyError:
+			return self._frame_register.keys()
+		else:
+			try:
+				awaitable = child.step(msg)
 			except StopIteration as stop:
-				self.results[child] = stop.value
+				self._results[child] = stop.value
 			except GeneratorExit:
-				self.results[child] = None
+				self._results[child] = None
+			else:
+				self._frame_register[awaitable] = child
 
 		if self._children: # If some children aren't finished yet
-			return self
+			return self._frame_register.keys()
 		else: # If all children finished and removed themselves from self._children
 			stop = StopIteration()
-			stop.value = self.results.values()
+			stop.value = self._results.values()
 			raise stop
 
 	def remove(self):
@@ -124,14 +140,29 @@ class any_(Awaitable):
 				child._parent._children.remove(child)
 			child._parent = self
 
-		self.results = {}
+		self._results = {}
+		self._frame_register = {}
+		for child in self._children:
+			try:
+				awaitable = child.step(None)
+			except (StopIteration, GeneratorExit):
+				raise Exception("This should never be reached, because child.step(None) should only return awaitable and not finish.")
+			else:
+				self._frame_register[awaitable] = child
 
 	def step(self, msg=None):
-		for child in self._children:
-			child.step(msg)
-		
-		# If no child raised StopIteration
-		return self
+		if msg is None:
+			return self._frame_register.keys()
+		try:
+			child = self._frame_register.pop(msg.target)
+		except KeyError:
+			return self._frame_register.keys()
+		else:
+			awaitable = child.step(msg)
+
+			# If child didn't raise StopIteration or GeneratorExit
+			self._frame_register[awaitable] = child
+			return self._frame_register.keys()
 
 	def remove(self):
 		for child in self._children:
@@ -187,22 +218,32 @@ class Frame(Awaitable):
 			self._parent._children.append(self)
 		self._children = []
 		self._activechild = None
-
 		self._primitives = []
+		self._generator = None
+		self._removed = False
 
 	def create(self, framefunc, *frameargs, **framekwargs):
-		self.__name__ = framefunc.__name__
-		self._removed = False
-		
-		# Activate self
-		Frame._current = self
+		if not self._removed and self._generator is None:
+			self.__name__ = framefunc.__name__
 
-		hasself = 'self' in inspect.signature(framefunc).parameters
-		self._generator = None # Define generator in case self.remove() is called within framefunc()
-		self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
+			# Activate self
+			Frame._current = self
 
-		# Activate parent
-		Frame._current = self._parent
+			hasself = 'self' in inspect.signature(framefunc).parameters
+			self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
+
+			if inspect.isawaitable(self._generator):
+				# Start coroutine
+				try:
+					awaitable = self._generator.send(None)
+				except (StopIteration, GeneratorExit): # If coroutine is done
+					Frame._current = self._parent # Activate parent
+					self.remove()
+				else: # If coroutine isn't done
+					EventLoop._current.register_frame(self, awaitable) # Register self in event loop
+
+			# Activate parent
+			Frame._current = self._parent
 
 	def step(self, msg=None):
 		if self._removed:
@@ -224,16 +265,14 @@ class Frame(Awaitable):
 		# Activate parent
 		Frame._current = self._parent
 
-		# Advance passive child frames
-		for child in self._children:
-			if child != self._activechild:
-				try:
-					awaitable = child.step(msg)
-				except (StopIteration, GeneratorExit):
-					child.remove()
-					pass
-				else:
-					EventLoop._current.onpassiveframeprocessed(awaitable)
+		# # Advance passive child frames
+		# for child in self._children:
+		# 	if child != self._activechild:
+		# 		try:
+		# 			awaitable = child.step(msg)
+		# 		except (StopIteration, GeneratorExit):
+		# 			child.remove()
+		# 			pass
 
 		# Return iteration result of active child frame
 		return result

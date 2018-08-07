@@ -12,8 +12,6 @@ class DialogResult(enum.Enum):
 async def main():
 	# Start an arbitrary process in the background
 	p = process()
-	# Wait until the process has started reporting progress
-	await sleep() #await (lambda: hasattr(p, 'progress')) #TODO
 
 	# Show a wframe to monitor progress and wait until it finishes
 	print("Dialog result:", await dialog(p))
