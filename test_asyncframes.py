@@ -4,7 +4,8 @@ import logging
 import sys
 import unittest
 from PyQt5.QtWidgets import QApplication
-from asyncframes import run, sleep, define_frame, Frame, Primitive
+from asyncframes import sleep, define_frame, Frame, Primitive
+from pyqt5_eventloop import EventLoop
 
 # def log(msg=None):
 # 	t = (datetime.datetime.now() - starttime).total_seconds()
@@ -38,12 +39,8 @@ class Tests (unittest.TestCase):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 
-		# Run an empty frame to perform one time initialization
-		@MyFrame
-		async def emptyframe():
-			pass
-		run(emptyframe)
-	
+		self.loop = EventLoop()
+
 	def setUp(self):
 		# Create logger for debugging program flow using time stamped log messages
 		# Create time stamped log messages using log.debug(...)
@@ -74,7 +71,7 @@ class Tests (unittest.TestCase):
 		async def main():
 			wait(0.1, '1')
 			await wait(0.2, '2')
-		run(main)
+		self.loop.run(main)
 		self.assertLogEqual("""
 			0.1: 1
 			0.2: 2
@@ -85,7 +82,7 @@ class Tests (unittest.TestCase):
 		async def main():
 			await wait(0.1, '1')
 			await wait(0.2, '2')
-		run(main)
+		self.loop.run(main)
 		self.assertLogEqual("""
 			0.1: 1
 			0.3: 2
@@ -96,7 +93,7 @@ class Tests (unittest.TestCase):
 		async def main():
 			await wait(0.1, '1')
 			wait(0.2, '2')
-		run(main)
+		self.loop.run(main)
 		self.assertLogEqual("""
 			0.1: 1
 		""")
@@ -106,7 +103,7 @@ class Tests (unittest.TestCase):
 		async def main():
 			wait(0.1, '1')
 			wait(0.2, '2')
-		run(main)
+		self.loop.run(main)
 		self.assertLogEqual("""
 		""")
 
@@ -116,7 +113,7 @@ class Tests (unittest.TestCase):
 			w1 = wait(0.1, '1')
 			w2 = wait(0.2, '2')
 			await (w1 & w2)
-		run(main)
+		self.loop.run(main)
 		self.assertLogEqual("""
 			0.1: 1
 			0.2: 2
@@ -128,7 +125,7 @@ class Tests (unittest.TestCase):
 			w1 = wait(0.1, '1')
 			w2 = wait(0.2, '2')
 			await (w1 | w2)
-		run(main)
+		self.loop.run(main)
 		self.assertLogEqual("""
 			0.1: 1
 		""")
@@ -137,7 +134,7 @@ class Tests (unittest.TestCase):
 		@MyFrame
 		async def main():
 			log.debug(await wait(0.1, '1'))
-		run(main)
+		self.loop.run(main)
 		self.assertLogEqual("""
 			0.1: 1
 			0.1: some result
@@ -147,7 +144,7 @@ class Tests (unittest.TestCase):
 		@MyFrame
 		async def main():
 			log.debug((await sleep(0.1)).args)
-		run(main)
+		self.loop.run(main)
 		self.assertLogEqual("""
 			0.1: None
 		""")
@@ -156,7 +153,7 @@ class Tests (unittest.TestCase):
 		@MyFrame
 		async def main():
 			log.debug((await sleep(0)).args)
-		run(main)
+		self.loop.run(main)
 		self.assertLogEqual("""
 			0.0: None
 		""")
@@ -165,7 +162,7 @@ class Tests (unittest.TestCase):
 		@MyFrame
 		async def main():
 			MyFrame.mystaticmethod()
-		run(main)
+		self.loop.run(main)
 		self.assertLogEqual("""
 			0.0: static method called
 		""")
@@ -174,7 +171,7 @@ class Tests (unittest.TestCase):
 		@MyFrame
 		async def main():
 			log.debug(MyFrame.classvar)
-		run(main)
+		self.loop.run(main)
 		self.assertLogEqual("""
 			0.0: class variable
 		""")
@@ -183,18 +180,18 @@ class Tests (unittest.TestCase):
 		@MyFrame
 		async def f1():
 			MyPrimitive()
-		run(f1)
+		self.loop.run(f1)
 
 		@MyFrame2
 		async def f2():
 			MyPrimitive()
 		with self.assertRaises(Exception):
-			run(f2)
+			self.loop.run(f2)
 
 		@MyFrame
 		async def f3():
 			f2()
-		run(f3)
+		self.loop.run(f3)
 
 		with self.assertRaises(Exception):
 			MyPrimitive()
@@ -228,7 +225,7 @@ class Tests (unittest.TestCase):
 		def subframe(self):
 			test.assertEqual(Frame._current, self)
 			test.subframe_counter += 1
-		run(frame)
+		self.loop.run(frame)
 		test.assertEqual(test.subframe_counter, 4)
 
 	def test_remove_self(self):
@@ -242,8 +239,8 @@ class Tests (unittest.TestCase):
 			log.debug("3")
 			self.remove()
 			log.debug("never reached") # Frame.remove() interrupts async frame functions
-		run(frame)
-		run(async_frame)
+		self.loop.run(frame)
+		self.loop.run(async_frame)
 		self.assertLogEqual("""
 			0.0: 1
 			0.0: 2

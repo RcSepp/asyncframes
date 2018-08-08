@@ -1,4 +1,5 @@
-from asyncframes import run, Frame, sleep
+from asyncframes import Frame, sleep
+from pyqt5_eventloop import EventLoop
 from gui import WFrame, Layout
 from gui.widgets import Button, ProgressBar, enable_widget_properties
 enable_widget_properties()
@@ -56,4 +57,5 @@ async def dialog(p):
 
 	# Close dialog
 
-run(main)
+loop = EventLoop()
+loop.run(main)

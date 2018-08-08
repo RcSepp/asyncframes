@@ -103,8 +103,9 @@ def enable_widget_properties():
 
 
 if __name__ == "__main__":
-	from asyncframes import run, hold, sleep, any_
+	from asyncframes import hold, sleep, any_
 	from gui import WFrame, WGFrame, Layout
+	from pyqt5_eventloop import EventLoop
 
 	enable_widget_properties()
 
@@ -138,4 +139,5 @@ if __name__ == "__main__":
 			clicked_button = (await any_(*[button.clicked for button in examples.keys()])).sender
 			await examples[clicked_button]()
 
-	run(main)
+	loop = EventLoop()
+	loop.run(main)
