@@ -1,6 +1,6 @@
 from PyQt5 import QtWidgets, QtCore
 from asyncframes import Awaitable, Primitive, hold, sleep, any_
-from gui import WLFrame
+from gui import Frame, WLFrame, Layout
 
 class Widget(Primitive):
 	def __init__(self):
@@ -26,45 +26,51 @@ class Widget(Primitive):
 				self._owner.layout.addWidget(self)
 		self.show()
 
-	def _convert_all_signals_to_awaitables(self):
-		for key in dir(self.__class__):
-			try:
-				signal = getattr(self, key)
-			except TypeError:
-				continue
-			if type(signal) == QtCore.pyqtBoundSignal:
-				awaitable = Awaitable("{}.{}".format(self.__class__.__name__, key), signal, self)
-				awaitable.connect = signal.connect # Preserve pyqtBoundSignal.connect()
-				awaitable.emit = signal.emit # Preserve pyqtBoundSignal.emit()
-				setattr(self, key, awaitable)
-
 class Label(Widget, QtWidgets.QLabel):
 	def __init__(self, text="Label", pos=None, row=None, col=None, rowspan=1, colspan=1):
 		super().__init__()
 		QtWidgets.QLabel.__init__(self, text, self._owner.widget)
-		self._convert_all_signals_to_awaitables()
+		_convert_all_signals_to_awaitables(self)
 		self._show(pos, row, col, rowspan, colspan)
 
 class Button(Widget, QtWidgets.QPushButton):
 	def __init__(self, text="Button", pos=None, row=None, col=None, rowspan=1, colspan=1):
 		super().__init__()
 		QtWidgets.QPushButton.__init__(self, text, self._owner.widget)
-		self._convert_all_signals_to_awaitables()
+		_convert_all_signals_to_awaitables(self)
 		self._show(pos, row, col, rowspan, colspan)
 
 class ProgressBar(Widget, QtWidgets.QProgressBar):
 	def __init__(self, pos=None, row=None, col=None, rowspan=1, colspan=1):
 		super().__init__()
 		QtWidgets.QProgressBar.__init__(self, self._owner.widget)
-		self._convert_all_signals_to_awaitables()
+		_convert_all_signals_to_awaitables(self)
 		self._show(pos, row, col, rowspan, colspan)
 
-class Action(Widget, QtWidgets.QAction):
-	def __init__(self, text):
+class PlainTextEdit(Widget, QtWidgets.QPlainTextEdit):
+	def __init__(self, pos=None, row=None, col=None, rowspan=1, colspan=1):
 		super().__init__()
-		QtWidgets.QAction.__init__(self, text, self._owner.widget)
-		self._convert_all_signals_to_awaitables()
+		QtWidgets.QPlainTextEdit.__init__(self, self._owner.widget)
+		_convert_all_signals_to_awaitables(self)
+		self._show(pos, row, col, rowspan, colspan)
 
+class Action(Primitive, QtWidgets.QAction):
+	def __init__(self, text):
+		super().__init__(WLFrame)
+		QtWidgets.QAction.__init__(self, text, self._owner.widget)
+		_convert_all_signals_to_awaitables(self)
+
+def stretch(stretch):
+	# Find parent frame of class WLFrame
+	wframe = Frame._current
+	while wframe and not issubclass(type(wframe), WLFrame):
+		wframe = wframe._parent
+	if not wframe:
+		raise Exception("stretch() can't be defined outside WLFrame")
+	if type(wframe.layout) != QtWidgets.QHBoxLayout and type(wframe.layout) != QtWidgets.QVBoxLayout:
+		raise Exception("stretch() can only be defined inside a WLFrame with hbox or vbox layout")
+
+	wframe.layout.addStretch(stretch)
 
 def enable_widget_properties():
 	import inspect
@@ -95,12 +101,23 @@ def enable_widget_properties():
 				setattr(dest, key, property(getter, setters[key])) # Overwrite getter with property
 	
 	for clsname, cls in inspect.getmembers(sys.modules[__name__], inspect.isclass): # For each class in current module
-		if cls != Widget and issubclass(cls, Widget): # If class is subclass of Widget
+		if cls != Widget and issubclass(cls, Primitive): # If class is subclass of Primitive
 			for basecls in inspect.getmro(cls): # For each class in inheritance hierarchy of cls
 				if basecls != Widget and basecls != cls and issubclass(basecls, QtCore.QObject): # Find highest base class that inherits from QObject
 					create_properties(basecls, cls) # Substitute getter/setter pairs of basecls with Python properties in cls
 					break
 
+def _convert_all_signals_to_awaitables(obj):
+	for key in dir(obj.__class__):
+		try:
+			signal = getattr(obj, key)
+		except TypeError:
+			continue
+		if type(signal) == QtCore.pyqtBoundSignal:
+			awaitable = Awaitable("{}.{}".format(obj.__class__.__name__, key), signal, obj)
+			awaitable.connect = signal.connect # Preserve pyqtBoundSignal.connect()
+			awaitable.emit = signal.emit # Preserve pyqtBoundSignal.emit()
+			setattr(obj, key, awaitable)
 
 if __name__ == "__main__":
 	from asyncframes import hold, sleep, any_
