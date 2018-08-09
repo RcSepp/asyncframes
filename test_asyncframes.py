@@ -249,8 +249,8 @@ class Tests (unittest.TestCase):
 
 	def test_awaited_by_multiple(self):
 		@Frame
-		async def waitfor(a):
-			await a
+		async def waitfor(w):
+			await w
 		@Frame
 		async def main1(self):
 			w = wait(0.1, '1')
@@ -263,18 +263,30 @@ class Tests (unittest.TestCase):
 		self.loop.run(main2)
 		@Frame
 		async def main3(self):
-			w = wait(0.1, '3')
+			w = sleep(0.1)
 			a1 = waitfor(w)
 			a2 = waitfor(w)
 			await (a1 & a2)
 		self.loop.run(main3)
 		@Frame
 		async def main4(self):
+			w = wait(0.1, '3')
+			a1 = waitfor(w)
+			a2 = waitfor(w)
+			await (a1 & a2)
+		self.loop.run(main4)
+		@Frame
+		async def main5(self):
 			w = wait(0.1, '4')
 			a1 = waitfor(w)
 			a2 = waitfor(w)
 			await (a1 | a2)
-		self.loop.run(main4)
+		self.loop.run(main5)
+		@Frame
+		async def main6(self):
+			s = sleep(0.1)
+			await (s | s & s)
+		self.loop.run(main6)
 
 if __name__ == "__main__":
 	unittest.main()

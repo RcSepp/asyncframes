@@ -34,7 +34,6 @@ class EventLoop(asyncframes.EventLoop):
 		if asyncframes.EventLoop._current is not None:
 			raise Exception("Another event loop is already running")
 		asyncframes.EventLoop._current = self
-		self._frame_register = {}
 
 		try:
 			self.mainframe = frame()
@@ -46,34 +45,30 @@ class EventLoop(asyncframes.EventLoop):
 		except:
 			asyncframes.EventLoop._current = None
 			asyncframes.Frame._current = None
-			self._frame_register = None
 			raise
 		else:
 			asyncframes.EventLoop._current = None
 			asyncframes.Frame._current = None
-			self._frame_register = None
 
 	def sendevent(self, event):
 		# Discard events sent after the event loop has been closed
 		if self != asyncframes.EventLoop._current: return
 
-		try:
-			targetframe = self._frame_register.pop(event.target)
-		except KeyError:
-			log.debug("Ignoring event {}".format(event)) # Ignore unawaited event
+		if event.target._awaitable_leafs:
+			log.debug("Event {} wakes up {}".format(event, event.target._awaitable_leafs))
 		else:
-			log.debug("Processing event {}".format(event))
+			log.debug("Ignoring event {}".format(event))
+
+		for awaitable in event.target._awaitable_leafs:
 			try:
-				awaitable = targetframe.step(event)
+				awaitable.step(event)
 			except (StopIteration, GeneratorExit):
-				if targetframe == self.mainframe: # If the main frame finished
+				if awaitable == self.mainframe: # If the main frame finished
 					log.debug("Main frame finished")
 					QApplication.instance().exit()
 					return False
 				else:
-					log.debug("Frame {} finished".format(targetframe))
-			else:
-				self.register_frame(targetframe, awaitable)
+					log.debug("{} finished".format(awaitable))
 
 		return True
 
@@ -82,14 +77,6 @@ class EventLoop(asyncframes.EventLoop):
 		if self != asyncframes.EventLoop._current: return
 
 		QTimer.singleShot(1000 * delay, lambda: self.sendevent(event))
-
-	def register_frame(self, frame, awaitable):
-		log.debug("Frame {} awaits event {}".format(frame, awaitable))
-		if isinstance(awaitable, collections.Iterable):
-			for a in awaitable:
-				self._frame_register[a] = frame
-		else:
-			self._frame_register[awaitable] = frame
 
 if __name__ == "__main__":
 	from asyncframes import define_frame, Frame, Primitive, sleep

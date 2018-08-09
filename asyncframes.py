@@ -15,15 +15,16 @@ class EventLoop(metaclass=abc.ABCMeta):
 	@abc.abstractmethod
 	def postevent(self, event, delay=0):
 		raise NotImplementedError()
-	@abc.abstractmethod
-	def register_frame(self, frame, awaitable):
-		raise NotImplementedError()
 
 
 class Awaitable(collections.abc.Awaitable):
 	def __init__(self, name, signal=None, signal_sender=None):
 		self.__name__ = name
 		self._parent = None
+		self._awaitable_parent = None
+		self._awaitable_roots = set([self])
+		self._awaitable_children = []
+		self._awaitable_leafs = set()
 		if signal:
 			signal.connect(lambda e=None: Event(signal_sender, self, e).post())
 	def remove(self):
@@ -43,7 +44,7 @@ class Awaitable(collections.abc.Awaitable):
 				return stop.value
 			except GeneratorExit:
 				return None
-	def step(self, msg=None):
+	def step(self, msg):
 		if msg and msg.target == self:
 			stop = StopIteration()
 			stop.value = msg
@@ -53,6 +54,15 @@ class Awaitable(collections.abc.Awaitable):
 		return all_(self, other)
 	def __or__(self, other):
 		return any_(self, other)
+
+class LPAwaitable():
+	def __init__(self, value):
+		self.value = value
+	def deref(self):
+		value = self.value
+		while type(value) == LPAwaitable:
+			value = value.value
+		return value
 
 class Event():
 	def __init__(self, sender, target, args):
@@ -76,43 +86,41 @@ class all_(Awaitable):
 		self._parent = Frame._current
 		if self._parent:
 			self._parent._children.append(self)
-		self._children = list(awaitables)
 
-		# Adopt self._children
-		for child in self._children:
+		# Adopt awaitables
+		self._children = list(awaitables)
+		for child in self._children: # Note: This loop also erases identical children
 			if child._parent:
 				child._parent._children.remove(child)
 			child._parent = self
 
-		self._results = {}
-		self._frame_register = {}
-		for child in self._children:
-			try:
-				awaitable = child.step(None)
-			except (StopIteration, GeneratorExit):
-				raise Exception("This should never be reached, because child.step(None) should only return awaitable and not finish.")
-			else:
-				self._frame_register[awaitable] = child
+		# Update the awaitable graph
+		self._awaitable_roots.clear()
+		for awaitable in self._children:
+			self._awaitable_roots |= awaitable._awaitable_roots
+			awaitable._awaitable_children.append(self)
+			for awaitable_root in awaitable._awaitable_roots:
+				awaitable_root._awaitable_leafs.discard(awaitable)
+				awaitable_root._awaitable_leafs.add(self)
 
-	def step(self, msg=None):
+		self._results = {}
+
+
+	def step(self, msg):
 		if msg is None:
-			return self._frame_register.keys()
-		try:
-			child = self._frame_register.pop(msg.target)
-		except KeyError:
-			return self._frame_register.keys()
-		else:
-			try:
-				awaitable = child.step(msg)
-			except StopIteration as stop:
-				self._results[child] = stop.value
-			except GeneratorExit:
-				self._results[child] = None
-			else:
-				self._frame_register[awaitable] = child
+			return self
+
+		for child in self._children[:]:
+			if msg.target in child._awaitable_roots:
+				try:
+					child.step(msg)
+				except StopIteration as stop:
+					self._results[child] = stop.value
+				except GeneratorExit:
+					self._results[child] = None
 
 		if self._children: # If some children aren't finished yet
-			return self._frame_register.keys()
+			return self
 		else: # If all children finished and removed themselves from self._children
 			stop = StopIteration()
 			stop.value = self._results.values()
@@ -132,37 +140,33 @@ class any_(Awaitable):
 		self._parent = Frame._current
 		if self._parent:
 			self._parent._children.append(self)
-		self._children = list(awaitables)
 
-		# Adopt self._children
-		for child in self._children:
+		# Adopt awaitables
+		self._children = list(awaitables)
+		for child in self._children: # Note: This loop also erases identical children
 			if child._parent:
 				child._parent._children.remove(child)
 			child._parent = self
 
-		self._results = {}
-		self._frame_register = {}
-		for child in self._children:
-			try:
-				awaitable = child.step(None)
-			except (StopIteration, GeneratorExit):
-				raise Exception("This should never be reached, because child.step(None) should only return awaitable and not finish.")
-			else:
-				self._frame_register[awaitable] = child
+		# Update the awaitable graph
+		self._awaitable_roots.clear()
+		for awaitable in self._children:
+			self._awaitable_roots |= awaitable._awaitable_roots
+			awaitable._awaitable_children.append(self)
+			for awaitable_root in awaitable._awaitable_roots:
+				awaitable_root._awaitable_leafs.discard(awaitable)
+				awaitable_root._awaitable_leafs.add(self)
 
-	def step(self, msg=None):
+	def step(self, msg):
 		if msg is None:
-			return self._frame_register.keys()
-		try:
-			child = self._frame_register.pop(msg.target)
-		except KeyError:
-			return self._frame_register.keys()
-		else:
-			awaitable = child.step(msg)
+			return self
 
-			# If child didn't raise StopIteration or GeneratorExit
-			self._frame_register[awaitable] = child
-			return self._frame_register.keys()
+		for child in self._children[:]:
+			if msg.target in child._awaitable_roots:
+				awaitable = child.step(msg)
+
+				# If child didn't raise StopIteration or GeneratorExit
+				return self
 
 	def remove(self):
 		for child in self._children:
@@ -178,7 +182,7 @@ class sleep(Awaitable):
 			raise ValueError()
 		super().__init__("sleep({})".format(seconds))
 		EventLoop._current.postevent(Event(None, self, None), delay=seconds)
-	def step(self, msg=None):
+	def step(self, msg):
 		if msg and msg.target == self:
 			stop = StopIteration()
 			stop.value = msg
@@ -188,7 +192,7 @@ class sleep(Awaitable):
 class hold(Awaitable):
 	def __init__(self, seconds=0.0):
 		super().__init__("hold()")
-	def step(self, msg=None):
+	def step(self, msg):
 		return self # hold can't be raised
 
 
@@ -232,20 +236,17 @@ class Frame(Awaitable):
 			hasself = 'self' in inspect.signature(framefunc).parameters
 			self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
 
-			if inspect.isawaitable(self._generator):
-				# Start coroutine
-				try:
-					awaitable = self._generator.send(None)
-				except (StopIteration, GeneratorExit): # If coroutine is done
-					Frame._current = self._parent # Activate parent
-					self.remove()
-				else: # If coroutine isn't done
-					EventLoop._current.register_frame(self, awaitable) # Register self in event loop
-
 			# Activate parent
 			Frame._current = self._parent
 
-	def step(self, msg=None):
+			if inspect.isawaitable(self._generator): # If framefunc is a coroutine
+				# Start coroutine
+				try:
+					self.step(None)
+				except (StopIteration, GeneratorExit):
+					pass
+
+	def step(self, msg):
 		if self._removed:
 			raise StopIteration()
 		if self._generator is None:
@@ -256,7 +257,7 @@ class Frame(Awaitable):
 
 		# Advance generator
 		try:
-			result = self._generator.send(None if self._generator.cr_await is None else msg)
+			awaitable = self._generator.send(msg)
 		except (StopIteration, GeneratorExit): # If done
 			Frame._current = self._parent # Activate parent
 			self.remove()
@@ -265,17 +266,17 @@ class Frame(Awaitable):
 		# Activate parent
 		Frame._current = self._parent
 
-		# # Advance passive child frames
-		# for child in self._children:
-		# 	if child != self._activechild:
-		# 		try:
-		# 			awaitable = child.step(msg)
-		# 		except (StopIteration, GeneratorExit):
-		# 			child.remove()
-		# 			pass
+		# Update the awaitable graph
+		if awaitable != self._awaitable_parent:
+			if self._awaitable_parent: self._awaitable_parent._awaitable_children.remove(self)
+			self._awaitable_parent = awaitable
+			self._awaitable_roots = awaitable._awaitable_roots
+			awaitable._awaitable_children.append(self)
+			for awaitable_root in awaitable._awaitable_roots:
+				awaitable_root._awaitable_leafs.discard(awaitable)
+				awaitable_root._awaitable_leafs.add(self)
 
-		# Return iteration result of active child frame
-		return result
+		return self
 
 	def remove(self):
 		if not self._removed:
@@ -295,7 +296,7 @@ class Frame(Awaitable):
 
 			# Post frame removed event
 			Event(self, self, None).post()
-			
+
 			# Stop framefunc
 			if self._generator: # If framefunc is a coroutine
 				if self._generator.cr_running:
