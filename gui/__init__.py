@@ -97,8 +97,9 @@ class WFrame(WLFrame, QMainWindow, metaclass=WFrameMeta):
 		super().remove()
 
 	def closeEvent(self, event):
-		self.remove()
 		Event(self, self.closed, event).process()
+		if event.isAccepted(): # If event wasn't canceled by user
+			self.remove()
 
 	_keymap = {
 		16777216: keys.escape,
