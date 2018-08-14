@@ -8,7 +8,7 @@ import asyncframes
 
 
 log = logging.getLogger(__name__)
-if True:
+if False:
 	log.setLevel(logging.DEBUG)
 
 
@@ -54,21 +54,24 @@ class EventLoop(asyncframes.EventLoop):
 		# Discard events sent after the event loop has been closed
 		if self != asyncframes.EventLoop._current: return
 
-		if event.target._wakes_up:
-			log.debug("Event {} wakes up {}".format(event, event.target._wakes_up))
+		if event.target._listeners:
+			def recursive_listener_search(awaitable, listeners):
+				if awaitable._listeners:
+					for listener in awaitable._listeners:
+						recursive_listener_search(listener, listeners)
+				else:
+					listeners.add(awaitable)
+			listeners = set()
+			recursive_listener_search(event.target, listeners)
+			log.debug("Event {} wakes up {}".format(event, listeners))
 		else:
 			log.debug("Ignoring event {}".format(event))
 
-		for awaitable in event.target._wakes_up:
-			try:
-				awaitable.step(event)
-			except (StopIteration, GeneratorExit):
-				if awaitable == self.mainframe: # If the main frame finished
-					log.debug("Main frame finished")
-					QApplication.instance().exit()
-					return False
-				else:
-					log.debug("{} finished".format(awaitable))
+		event.target.process(event.target, event)
+		if self.mainframe._removed: # If the main frame finished
+			log.debug("Main frame finished")
+			QApplication.instance().exit()
+			return False
 
 		return True
 

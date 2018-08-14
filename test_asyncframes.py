@@ -66,6 +66,15 @@ class Tests (unittest.TestCase):
 		expected = expected.strip('\n').replace('\t', '') # Remove leading and trailing empty lines and tab stops
 		self.assertEqual(self.logstream.getvalue(), expected)
 
+	def test_simple(self):
+		@MyFrame
+		async def main():
+			await wait(0.1, '1')
+		self.loop.run(main)
+		self.assertLogEqual("""
+			0.1: 1
+		""")
+
 	def test_howtoyield_1(self):
 		@MyFrame
 		async def main():
