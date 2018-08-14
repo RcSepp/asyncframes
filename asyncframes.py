@@ -1,6 +1,20 @@
 import abc
 import collections.abc
 import inspect
+import logging
+import sys
+
+
+log = logging.getLogger(__name__)
+if True:
+	log.setLevel(logging.DEBUG)
+
+
+loghandler = logging.StreamHandler(sys.stdout)
+loghandler.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(message)s")
+loghandler.setFormatter(formatter)
+log.addHandler(loghandler)
 
 
 class EventLoop(metaclass=abc.ABCMeta):
@@ -21,31 +35,40 @@ class Awaitable(collections.abc.Awaitable):
 	def __init__(self, name, signal=None, signal_sender=None):
 		self.__name__ = name
 		self._parent = None
-		self._awaitable_parent = None
-		self._awaitable_roots = set([self])
-		self._awaitable_children = []
-		self._awaitable_leafs = set()
+		self._removed = False
+		self._wakes_up = set()
+		self._woken_by = set()
 		if signal:
 			signal.connect(lambda e=None: Event(signal_sender, self, e).post())
 	def remove(self):
-		pass
+		if self._removed:
+			return False
+		self._removed = True
+		#log.debug("REMOVING {}".format(self))
+		for awaitable in self._wakes_up:
+			awaitable._woken_by.remove(self)
+		return True
 	def __str__(self):
 		return self.__name__
 	def __repr__(self):
 		return self.__name__
 	def __await__(self):
-		msg = None
+		if self._removed: # If this awaitable finished before being awaited
+			raise StopIteration()
 		while True:
-			if self._parent:
-				self._parent._activechild = self
 			try:
-				msg = yield self.step(msg)
+				log.debug("{}await {}".format(str(Frame._current).ljust(10), self))
+				msg = yield self
+				log.debug("{}await {} -> {}".format(str(Frame._current).ljust(10), self, msg))
+				self.step(msg)
 			except StopIteration as stop:
 				return stop.value
 			except GeneratorExit:
 				return None
 	def step(self, msg):
+		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		if msg and msg.target == self:
+			#self.remove() # Don't remove primitive awaitables like events, since they may be raised multiple times
 			stop = StopIteration()
 			stop.value = msg
 			raise stop
@@ -54,15 +77,6 @@ class Awaitable(collections.abc.Awaitable):
 		return all_(self, other)
 	def __or__(self, other):
 		return any_(self, other)
-
-class LPAwaitable():
-	def __init__(self, value):
-		self.value = value
-	def deref(self):
-		value = self.value
-		while type(value) == LPAwaitable:
-			value = value.value
-		return value
 
 class Event():
 	def __init__(self, sender, target, args):
@@ -88,30 +102,38 @@ class all_(Awaitable):
 			self._parent._children.append(self)
 
 		# Adopt awaitables
-		self._children = list(awaitables)
+		self._children = [awaitable for awaitable in awaitables if not awaitable._removed]
 		for child in self._children: # Note: This loop also erases identical children
 			if child._parent:
 				child._parent._children.remove(child)
 			child._parent = self
 
-		# Update the awaitable graph
-		self._awaitable_roots.clear()
-		for awaitable in self._children:
-			self._awaitable_roots |= awaitable._awaitable_roots
-			awaitable._awaitable_children.append(self)
-			for awaitable_root in awaitable._awaitable_roots:
-				awaitable_root._awaitable_leafs.discard(awaitable)
-				awaitable_root._awaitable_leafs.add(self)
-
 		self._results = {}
+
+		for child in self._children:
+			if child._woken_by: # If child is itself waiting for other awaitables
+				# Steal wake target from child
+				for waker in child._woken_by:
+					try:
+						waker._wakes_up.remove(child)
+					except KeyError:
+						pass
+					else:
+						waker._wakes_up.add(self)
+				self._woken_by |= child._woken_by
+			elif self not in child._wakes_up:  # If child is waking up other awaitables
+				# Add self to wake-up set of child
+				child._wakes_up.add(self)
+				self._woken_by.add(child)
 
 
 	def step(self, msg):
+		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		if msg is None:
 			return self
 
 		for child in self._children[:]:
-			if msg.target in child._awaitable_roots:
+			if msg.target in child._woken_by:
 				try:
 					child.step(msg)
 				except StopIteration as stop:
@@ -119,23 +141,47 @@ class all_(Awaitable):
 				except GeneratorExit:
 					self._results[child] = None
 
-		if self._children: # If some children aren't finished yet
-			return self
-		else: # If all children finished and removed themselves from self._children
+		if not self._children: # If all children finished and removed themselves from self._children
+			self.remove()
 			stop = StopIteration()
 			stop.value = self._results.values()
 			raise stop
 
+		for child in self._children:
+			if child._woken_by: # If child is itself waiting for other awaitables
+				# Steal wake target from child
+				for waker in child._woken_by:
+					try:
+						waker._wakes_up.remove(child)
+					except KeyError:
+						pass
+					else:
+						waker._wakes_up.add(self)
+				self._woken_by |= child._woken_by
+			elif self not in child._wakes_up:  # If child is waking up other awaitables
+				# Add self to wake-up set of child
+				child._wakes_up.add(self)
+				self._woken_by.add(child)
+
+		return self
+
 	def remove(self):
+		if not super().remove():
+			return False
 		for child in self._children:
 			child.remove()
 		if self._parent:
 			self._parent._children.remove(self)
 		#del self
+		return True
 
 class any_(Awaitable):
 	def __init__(self, *awaitables):
 		super().__init__("any({})".format(", ".join(str(a) for a in awaitables)))
+
+		if any(awaitable._removed for awaitable in awaitables):
+			super().remove()
+			return
 
 		self._parent = Frame._current
 		if self._parent:
@@ -148,32 +194,62 @@ class any_(Awaitable):
 				child._parent._children.remove(child)
 			child._parent = self
 
-		# Update the awaitable graph
-		self._awaitable_roots.clear()
-		for awaitable in self._children:
-			self._awaitable_roots |= awaitable._awaitable_roots
-			awaitable._awaitable_children.append(self)
-			for awaitable_root in awaitable._awaitable_roots:
-				awaitable_root._awaitable_leafs.discard(awaitable)
-				awaitable_root._awaitable_leafs.add(self)
+		for child in self._children:
+			if child._woken_by: # If child is itself waiting for other awaitables
+				# Steal wake target from child
+				for waker in child._woken_by:
+					try:
+						waker._wakes_up.remove(child)
+					except KeyError:
+						pass
+					else:
+						waker._wakes_up.add(self)
+				self._woken_by |= child._woken_by
+			elif self not in child._wakes_up:  # If child is waking up other awaitables
+				# Add self to wake-up set of child
+				child._wakes_up.add(self)
+				self._woken_by.add(child)
 
 	def step(self, msg):
+		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		if msg is None:
 			return self
 
 		for child in self._children[:]:
-			if msg.target in child._awaitable_roots:
-				awaitable = child.step(msg)
+			if msg.target in child._woken_by:
+				try:
+					child.step(msg)
+				except (StopIteration, GeneratorExit):
+					self.remove()
+					raise
 
-				# If child didn't raise StopIteration or GeneratorExit
-				return self
+		for child in self._children:
+			if child._woken_by: # If child is itself waiting for other awaitables
+				# Steal wake target from child
+				for waker in child._woken_by:
+					try:
+						waker._wakes_up.remove(child)
+					except KeyError:
+						pass
+					else:
+						waker._wakes_up.add(self)
+				self._woken_by |= child._woken_by
+			elif self not in child._wakes_up:  # If child is waking up other awaitables
+				# Add self to wake-up set of child
+				child._wakes_up.add(self)
+				self._woken_by.add(child)
+
+		return self
 
 	def remove(self):
+		if not super().remove():
+			return False
 		for child in self._children:
 			child.remove()
 		if self._parent:
 			self._parent._children.remove(self)
 		#del self
+		return True
 
 
 class sleep(Awaitable):
@@ -181,9 +257,12 @@ class sleep(Awaitable):
 		if seconds < 0:
 			raise ValueError()
 		super().__init__("sleep({})".format(seconds))
+		log.debug("{}{}".format(str(Frame._current).ljust(10), self))
 		EventLoop._current.postevent(Event(None, self, None), delay=seconds)
 	def step(self, msg):
+		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		if msg and msg.target == self:
+			self.remove()
 			stop = StopIteration()
 			stop.value = msg
 			raise stop
@@ -193,6 +272,7 @@ class hold(Awaitable):
 	def __init__(self, seconds=0.0):
 		super().__init__("hold()")
 	def step(self, msg):
+		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		return self # hold can't be raised
 
 
@@ -257,7 +337,9 @@ class Frame(Awaitable):
 
 		# Advance generator
 		try:
+			log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 			awaitable = self._generator.send(msg)
+			log.debug("{}{}.step({}) -> {}".format(str(Frame._current).ljust(10), self, msg, awaitable))
 		except (StopIteration, GeneratorExit): # If done
 			Frame._current = self._parent # Activate parent
 			self.remove()
@@ -266,46 +348,53 @@ class Frame(Awaitable):
 		# Activate parent
 		Frame._current = self._parent
 
-		# Update the awaitable graph
-		if awaitable != self._awaitable_parent:
-			if self._awaitable_parent: self._awaitable_parent._awaitable_children.remove(self)
-			self._awaitable_parent = awaitable
-			self._awaitable_roots = awaitable._awaitable_roots
-			awaitable._awaitable_children.append(self)
-			for awaitable_root in awaitable._awaitable_roots:
-				awaitable_root._awaitable_leafs.discard(awaitable)
-				awaitable_root._awaitable_leafs.add(self)
+		if awaitable._woken_by: # If awaitable is itself waiting for other awaitables
+			# Steal wake target from awaitable
+			for waker in awaitable._woken_by:
+				try:
+					waker._wakes_up.remove(awaitable)
+				except KeyError:
+					pass
+				else:
+					waker._wakes_up.add(self)
+			self._woken_by |= awaitable._woken_by
+		elif self not in awaitable._wakes_up:  # If awaitable is waking up other awaitables
+			# Add self to wake-up set of awaitable
+			awaitable._wakes_up.add(self)
+			self._woken_by.add(awaitable)
 
 		return self
 
 	def remove(self):
-		if not self._removed:
-			self._removed = True
+		if not super().remove():
+			return False
 
-			# Remove child frames
-			while self._children:
-				self._children[-1].remove()
+		# Remove child frames
+		while self._children:
+			self._children[-1].remove()
 
-			# Remove self from parent frame
-			if self._parent:
-				self._parent._children.remove(self)
+		# Remove self from parent frame
+		if self._parent:
+			self._parent._children.remove(self)
 
-			# Remove primitives
-			while self._primitives:
-				self._primitives[-1].remove()
+		# Remove primitives
+		while self._primitives:
+			self._primitives[-1].remove()
 
-			# Post frame removed event
-			Event(self, self, None).post()
+		# Post frame removed event
+		Event(self, self, None).post()
 
-			# Stop framefunc
-			if self._generator: # If framefunc is a coroutine
-				if self._generator.cr_running:
-					# Calling coroutine.close() from within the coroutine is illegal, so we throw a GeneratorExit manually instead
-					self._generator = None
-					raise GeneratorExit()
-				else:
-					self._generator.close()
-					self._generator = None
+		# Stop framefunc
+		if self._generator: # If framefunc is a coroutine
+			if self._generator.cr_running:
+				# Calling coroutine.close() from within the coroutine is illegal, so we throw a GeneratorExit manually instead
+				self._generator = None
+				raise GeneratorExit()
+			else:
+				self._generator.close()
+				self._generator = None
+
+		return True
 
 
 

@@ -8,13 +8,13 @@ import asyncframes
 
 
 log = logging.getLogger(__name__)
-if False:
+if True:
 	log.setLevel(logging.DEBUG)
 
 
 loghandler = logging.StreamHandler(sys.stdout)
 loghandler.setLevel(logging.DEBUG)
-formatter = logging.Formatter("%(message)s")#('%(relativeCreated)d - %(name)s - %(levelname)s - %(message)s')
+formatter = logging.Formatter("%(message)s")
 loghandler.setFormatter(formatter)
 log.addHandler(loghandler)
 
@@ -54,12 +54,12 @@ class EventLoop(asyncframes.EventLoop):
 		# Discard events sent after the event loop has been closed
 		if self != asyncframes.EventLoop._current: return
 
-		if event.target._awaitable_leafs:
-			log.debug("Event {} wakes up {}".format(event, event.target._awaitable_leafs))
+		if event.target._wakes_up:
+			log.debug("Event {} wakes up {}".format(event, event.target._wakes_up))
 		else:
 			log.debug("Ignoring event {}".format(event))
 
-		for awaitable in event.target._awaitable_leafs:
+		for awaitable in event.target._wakes_up:
 			try:
 				awaitable.step(event)
 			except (StopIteration, GeneratorExit):
@@ -81,28 +81,40 @@ class EventLoop(asyncframes.EventLoop):
 if __name__ == "__main__":
 	from asyncframes import define_frame, Frame, Primitive, sleep
 
-	@define_frame
-	class MyFrame1(Frame):
-		pass
-	@define_frame
-	class MyFrame2(Frame):
-		pass
+	# @define_frame
+	# class MyFrame1(Frame):
+	# 	pass
+	# @define_frame
+	# class MyFrame2(Frame):
+	# 	pass
 
-	class MyPrimitive(Primitive):
-		def __init__(self):
-			super().__init__(MyFrame1)
+	# class MyPrimitive(Primitive):
+	# 	def __init__(self):
+	# 		super().__init__(MyFrame1)
 
-	@MyFrame1
-	async def frameA():
-		frameB(0.1, '1')
-		await frameB(0.2, '2')
-		print('DONE')
+	# @MyFrame1
+	# async def frameA():
+	# 	frameB(0.1, '1')
+	# 	await frameB(0.2, '2')
+	# 	print('DONE')
 
-	@MyFrame2
-	async def frameB(seconds, name):
-		p = MyPrimitive()
-		await sleep(seconds)
-		print(name)
+	# @MyFrame2
+	# async def frameB(seconds, name):
+	# 	p = MyPrimitive()
+	# 	await sleep(seconds)
+	# 	print(name)
 
+	# loop = EventLoop()
+	# loop.run(frameA)
+
+	@Frame
+	async def a():
+		await b()
+	@Frame
+	async def b():
+		await sleep(0.01)
+		await sleep(0.02)
+		await sleep(0.03)
+		await sleep(0.04)
 	loop = EventLoop()
-	loop.run(frameA)
+	loop.run(a)
