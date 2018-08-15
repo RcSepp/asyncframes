@@ -37,7 +37,7 @@ class EventLoop(asyncframes.EventLoop):
 
 		try:
 			self.mainframe = frame()
-			if not self.mainframe._removed:
+			if not self.mainframe.removed:
 				try:
 					self.qt.exec_()
 				except:
@@ -68,7 +68,7 @@ class EventLoop(asyncframes.EventLoop):
 			log.debug("Ignoring event {}".format(event))
 
 		event.target.process(event.target, event)
-		if self.mainframe._removed: # If the main frame finished
+		if self.mainframe.removed: # If the main frame finished
 			log.debug("Main frame finished")
 			QApplication.instance().exit()
 			return False

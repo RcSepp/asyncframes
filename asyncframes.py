@@ -45,12 +45,15 @@ class Awaitable(collections.abc.Awaitable):
 		self._removed = True
 		#log.debug("REMOVING {}".format(self))
 		return True
+	@property
+	def removed(self):
+		return self._removed
 	def __str__(self):
 		return self.__name__
 	def __repr__(self):
 		return "<{}.{} object at 0x{:x}>".format(self.__module__, self.__name__, id(self))
 	def __await__(self):
-		if self._removed: # If this awaitable finished before being awaited
+		if self.removed: # If this awaitable finished before being awaited
 			raise StopIteration()
 		while True:
 			try:
@@ -119,7 +122,7 @@ class all_(Awaitable):
 			self._parent._children.append(self)
 
 		# Adopt awaitables
-		self._children = [awaitable for awaitable in awaitables if not awaitable._removed]
+		self._children = [awaitable for awaitable in awaitables if not awaitable.removed]
 		for child in self._children: # Note: This loop also erases identical children
 			if child._parent:
 				child._parent._children.remove(child)
@@ -129,7 +132,7 @@ class all_(Awaitable):
 
 
 	def __await__(self):
-		if self._removed: # If this awaitable finished before being awaited
+		if self.removed: # If this awaitable finished before being awaited
 			raise StopIteration()
 		while True:
 			try:
@@ -179,7 +182,7 @@ class any_(Awaitable):
 	def __init__(self, *awaitables):
 		super().__init__("any({})".format(", ".join(str(a) for a in awaitables)))
 
-		if any(awaitable._removed for awaitable in awaitables):
+		if any(awaitable.removed for awaitable in awaitables):
 			super().remove()
 			return
 
@@ -195,7 +198,7 @@ class any_(Awaitable):
 			child._parent = self
 
 	def __await__(self):
-		if self._removed: # If this awaitable finished before being awaited
+		if self.removed: # If this awaitable finished before being awaited
 			raise StopIteration()
 		while True:
 			try:
@@ -289,10 +292,9 @@ class Frame(Awaitable):
 		self._activechild = None
 		self._primitives = []
 		self._generator = None
-		self._removed = False
 
 	def create(self, framefunc, *frameargs, **framekwargs):
-		if not self._removed and self._generator is None:
+		if not self.removed and self._generator is None:
 			self.__name__ = framefunc.__name__
 
 			# Activate self
@@ -312,7 +314,7 @@ class Frame(Awaitable):
 					pass
 
 	def step(self, sender, msg):
-		if self._removed:
+		if self.removed:
 			raise StopIteration()
 		if self._generator is None:
 			return self

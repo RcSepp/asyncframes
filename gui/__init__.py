@@ -68,7 +68,7 @@ class WLFrame(Frame):
 			self.setWindowModality(Qt.ApplicationModal) # Disable the parent window while this window is open
 
 	def remove(self):
-		if self._removed:
+		if self.removed:
 			return
 		if self._wparent and self.widget != self._wparent.widget:
 			#TODO: Remove widget from layout
@@ -91,7 +91,7 @@ class WFrame(WLFrame, QMainWindow, metaclass=WFrameMeta):
 		self.closed = Awaitable("WFrame.closed")
 
 	def remove(self):
-		if self._removed:
+		if self.removed:
 			return
 		self.deleteLater()
 		super().remove()
