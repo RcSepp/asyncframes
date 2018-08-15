@@ -32,13 +32,11 @@ class EventLoop(metaclass=abc.ABCMeta):
 
 
 class Awaitable(collections.abc.Awaitable):
-	def __init__(self, name, signal=None, signal_sender=None):
+	def __init__(self, name):
 		self.__name__ = name
 		self._parent = None
 		self._removed = False
 		self._listeners = set()
-		if signal:
-			signal.connect(lambda e=None: Event(signal_sender, self, e).post())
 	def remove(self):
 		if self._removed:
 			return False
@@ -57,22 +55,25 @@ class Awaitable(collections.abc.Awaitable):
 			raise StopIteration()
 		while True:
 			try:
-				log.debug("{}await {}".format(str(Frame._current).ljust(10), self))
-				self._listeners.add(Frame._current)
+				listener = Frame._current
+				self._listeners.add(listener)
+				log.debug("{}await {}".format(str(listener).ljust(10), self))
 				msg = yield self
-				self._listeners.remove(Frame._current)
-				log.debug("{}await {} -> {}".format(str(Frame._current).ljust(10), self, msg))
+				log.debug("{}await {} -> {}".format(str(listener).ljust(10), self, msg))
 				if isinstance(msg, Exception):
 					raise msg
-				#self.step(eventstack, eventstackptr)
 			except StopIteration as stop:
+				self._listeners.remove(listener)
 				return stop.value
 			except GeneratorExit:
+				self._listeners.remove(listener)
 				return None
+			else:
+				self._listeners.remove(listener)
 	def step(self, sender, msg):
 		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		if msg and msg.target == self:
-			#self.remove() # Don't remove primitive awaitables like events, since they may be raised multiple times
+			self.remove()
 			stop = StopIteration()
 			stop.value = msg
 			raise stop
@@ -97,6 +98,14 @@ class Awaitable(collections.abc.Awaitable):
 		return all_(self, other)
 	def __or__(self, other):
 		return any_(self, other)
+
+class AwaitableEvent(Awaitable):
+	def __init__(self, name, signal=None, signal_sender=None):
+		super().__init__(name)
+		if signal:
+			signal.connect(lambda e=None: Event(signal_sender, self, e).post())
+	def remove(self):
+		return True  # Don't remove awaitable events, since they may be raised multiple times
 
 class Event():
 	def __init__(self, sender, target, args):
@@ -136,22 +145,29 @@ class all_(Awaitable):
 			raise StopIteration()
 		while True:
 			try:
-				log.debug("{}await {}".format(str(Frame._current).ljust(10), self))
+				listener = Frame._current
+				self._listeners.add(listener)
 				for child in self._children:
 					child._listeners.add(self)
-				self._listeners.add(Frame._current)
+				log.debug("{}await {}".format(str(listener).ljust(10), self))
 				msg = yield self
-				self._listeners.remove(Frame._current)
-				for child in self._children:
-					child._listeners.remove(self)
-				log.debug("{}await {} -> {}".format(str(Frame._current).ljust(10), self, msg))
+				log.debug("{}await {} -> {}".format(str(listener).ljust(10), self, msg))
 				if isinstance(msg, Exception):
 					raise msg
-				#self.step(eventstack, eventstackptr)
 			except StopIteration as stop:
+				self._listeners.remove(listener)
+				for child in self._children:
+					child._listeners.remove(self)
 				return stop.value
 			except GeneratorExit:
+				self._listeners.remove(listener)
+				for child in self._children:
+					child._listeners.remove(self)
 				return None
+			else:
+				self._listeners.remove(listener)
+				for child in self._children:
+					child._listeners.remove(self)
 	def step(self, sender, msg):
 		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		if msg is None:
@@ -202,22 +218,29 @@ class any_(Awaitable):
 			raise StopIteration()
 		while True:
 			try:
-				log.debug("{}await {}".format(str(Frame._current).ljust(10), self))
+				listener = Frame._current
+				self._listeners.add(listener)
 				for child in self._children:
 					child._listeners.add(self)
-				self._listeners.add(Frame._current)
+				log.debug("{}await {}".format(str(listener).ljust(10), self))
 				msg = yield self
+				log.debug("{}await {} -> {}".format(str(listener).ljust(10), self, msg))
 				if isinstance(msg, Exception):
 					raise msg
-				self._listeners.remove(Frame._current)
+			except StopIteration as stop:
+				self._listeners.remove(listener)
 				for child in self._children:
 					child._listeners.remove(self)
-				log.debug("{}await {} -> {}".format(str(Frame._current).ljust(10), self, msg))
-				#self.step(eventstack, eventstackptr)
-			except StopIteration as stop:
 				return stop.value
 			except GeneratorExit:
+				self._listeners.remove(listener)
+				for child in self._children:
+					child._listeners.remove(self)
 				return None
+			else:
+				self._listeners.remove(listener)
+				for child in self._children:
+					child._listeners.remove(self)
 	def step(self, sender, msg):
 		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		if msg is None:

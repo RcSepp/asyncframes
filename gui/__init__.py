@@ -3,7 +3,7 @@ from enum import Enum
 from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import QWidget, QMainWindow, QGroupBox, QLayout, QHBoxLayout, QVBoxLayout, QGridLayout
 from PyQt5.QtCore import QObject, Qt
-from asyncframes import define_frame, Awaitable, Event, Frame, Primitive, hold, sleep, any_
+from asyncframes import define_frame, AwaitableEvent, Event, Frame, Primitive, hold, sleep, any_
 import keys
 
 class Layout(Enum):
@@ -88,7 +88,7 @@ class WFrame(WLFrame, QMainWindow, metaclass=WFrameMeta):
 			self.setWindowTitle(title)
 		self.setCentralWidget(self.widget)
 		self.show()
-		self.closed = Awaitable("WFrame.closed")
+		self.closed = AwaitableEvent("WFrame.closed")
 
 	def remove(self):
 		if self.removed:

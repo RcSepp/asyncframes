@@ -1,6 +1,6 @@
 import re
 from PyQt5 import QtWidgets, QtCore
-from asyncframes import Awaitable, Primitive, hold, sleep, any_
+from asyncframes import AwaitableEvent, Primitive, hold, sleep, any_
 from gui import Frame, WLFrame, Layout
 
 def _create_properties(src, dest):
@@ -141,7 +141,7 @@ def _convert_all_signals_to_awaitables(obj):
 		except TypeError:
 			continue
 		if type(signal) == QtCore.pyqtBoundSignal:
-			awaitable = Awaitable("{}.{}".format(obj.__class__.__name__, key), signal, obj)
+			awaitable = AwaitableEvent("{}.{}".format(obj.__class__.__name__, key), signal, obj)
 			awaitable.connect = signal.connect # Preserve pyqtBoundSignal.connect()
 			awaitable.emit = signal.emit # Preserve pyqtBoundSignal.emit()
 			setattr(obj, key, awaitable)

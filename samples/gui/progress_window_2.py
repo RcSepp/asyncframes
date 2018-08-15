@@ -1,5 +1,5 @@
 import enum
-from asyncframes import Frame, sleep, Awaitable, Event
+from asyncframes import Frame, sleep, AwaitableEvent, Event
 from pyqt5_eventloop import EventLoop
 from gui import WFrame, Layout
 from gui.widgets import Button, ProgressBar
@@ -29,7 +29,7 @@ async def process(self):
 	This process simply advances its progress by 1% every 100ms (total runtime: 100 * 100ms = 10s)
 	"""
 	progress = 0 # Progress in %
-	self.progress = Awaitable('process.progress') # Awaitable progress reporter
+	self.progress = AwaitableEvent('process.progress') # Awaitable progress reporter
 	while progress < 100:
 		progress += 12
 		Event(self, self.progress, progress).post()
