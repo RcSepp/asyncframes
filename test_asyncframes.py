@@ -4,7 +4,7 @@ import logging
 import sys
 import unittest
 from PyQt5.QtWidgets import QApplication
-from asyncframes import sleep, define_frame, Frame, Primitive
+from asyncframes import sleep, define_frame, AwaitableEvent, Event, Frame, Primitive
 from pyqt5_eventloop import EventLoop
 
 # def log(msg=None):
@@ -64,7 +64,7 @@ class Tests (unittest.TestCase):
 
 	def assertLogEqual(self, expected):
 		expected = expected.strip('\n').replace('\t', '') # Remove leading and trailing empty lines and tab stops
-		self.assertEqual(self.logstream.getvalue(), expected)
+		self.assertEqual(expected, self.logstream.getvalue())
 
 	def test_simple(self):
 		@MyFrame
@@ -74,6 +74,19 @@ class Tests (unittest.TestCase):
 		self.assertLogEqual("""
 			0.1: 1
 		""")
+
+	def test_regular_function_mainframe(self):
+		@MyFrame
+		def main():
+			pass
+		self.loop.run(main)
+
+	def test_negative_sleep_duration(self):
+		@MyFrame
+		async def main():
+			with self.assertRaises(ValueError):
+				sleep(-1)
+		self.loop.run(main)
 
 	def test_howtoyield_1(self):
 		@MyFrame
@@ -296,6 +309,47 @@ class Tests (unittest.TestCase):
 			s = sleep(0.1)
 			await (s | s & s)
 		self.loop.run(main6)
+
+	def test_finished_before_await(self):
+		@Frame
+		async def main():
+			s = sleep(0.1)
+			w = wait(0.1, '1')
+			log.debug((await sleep(0.2)).target)
+			log.debug((await s).target)
+			log.debug(await w)
+			log.debug((await (s | w)).target)
+			for k, v in (await (s & w)).items():
+				log.debug("{}: {}".format(k, v))
+			log.debug('done')
+		self.loop.run(main)
+		self.assertLogEqual("""
+			0.1: 1
+			0.2: sleep(0.2)
+			0.2: sleep(0.1)
+			0.2: some result
+			0.2: sleep(0.1)
+			0.2: sleep(0.1): sleep(0.1)
+			0.2: wait: some result
+			0.2: done
+		""")
+
+	def test_custom_event(self):
+		@Frame
+		async def main():
+			ae = AwaitableEvent('my event')
+			raise_event(0.1, ae)
+			e = await ae
+			log.debug("'%s' raised '%s' with args '%s'", e.sender, e.target, e.args)
+		@Frame
+		async def raise_event(self, seconds, awaitable_event):
+			await sleep(seconds)
+			Event(self, awaitable_event, 'my event args').process()
+
+		self.loop.run(main)
+		self.assertLogEqual("""
+			0.1: 'raise_event' raised 'my event' with args 'my event args'
+		""")
 
 if __name__ == "__main__":
 	unittest.main()

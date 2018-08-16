@@ -37,7 +37,7 @@ class EventLoop(asyncframes.EventLoop):
 
 		try:
 			self.mainframe = frame()
-			if not self.mainframe.removed:
+			if self.mainframe._generator is not None:
 				try:
 					self.qt.exec_()
 				except:

@@ -36,6 +36,7 @@ class Awaitable(collections.abc.Awaitable):
 		self.__name__ = name
 		self._parent = None
 		self._removed = False
+		self._result = None
 		self._listeners = set()
 	def remove(self):
 		if self._removed:
@@ -51,8 +52,8 @@ class Awaitable(collections.abc.Awaitable):
 	def __repr__(self):
 		return "<{}.{} object at 0x{:x}>".format(self.__module__, self.__name__, id(self))
 	def __await__(self):
-		if self.removed: # If this awaitable finished before being awaited
-			raise StopIteration()
+		if self.removed: # If this awaitable already finished
+			return self._result
 		while True:
 			try:
 				listener = Frame._current
@@ -62,21 +63,20 @@ class Awaitable(collections.abc.Awaitable):
 				log.debug("{}await {} -> {}".format(str(listener).ljust(10), self, msg))
 				if isinstance(msg, Exception):
 					raise msg
-			except StopIteration as stop:
+			except (StopIteration, GeneratorExit):
 				self._listeners.remove(listener)
-				return stop.value
-			except GeneratorExit:
-				self._listeners.remove(listener)
-				return None
+				return self._result
 			else:
 				self._listeners.remove(listener)
 	def step(self, sender, msg):
 		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		if msg and msg.target == self:
+			self._result = msg
 			self.remove()
 			stop = StopIteration()
 			stop.value = msg
 			raise stop
+		return self #TODO: Never reached
 	def process(self, sender, msg):
 		try:
 			msg = self.step(sender, msg)
@@ -126,6 +126,11 @@ class all_(Awaitable):
 	def __init__(self, *awaitables):
 		super().__init__("all({})".format(", ".join(str(a) for a in awaitables)))
 
+		self._result = {awaitable:awaitable._result for awaitable in awaitables if awaitable.removed}
+		if len(self._result) == len(awaitables):
+			super().remove()
+			return
+
 		self._parent = Frame._current
 		if self._parent:
 			self._parent._children.append(self)
@@ -137,12 +142,10 @@ class all_(Awaitable):
 				child._parent._children.remove(child)
 			child._parent = self
 
-		self._results = {}
-
 
 	def __await__(self):
-		if self.removed: # If this awaitable finished before being awaited
-			raise StopIteration()
+		if self.removed: # If this awaitable already finished
+			return self._result
 		while True:
 			try:
 				listener = Frame._current
@@ -154,16 +157,11 @@ class all_(Awaitable):
 				log.debug("{}await {} -> {}".format(str(listener).ljust(10), self, msg))
 				if isinstance(msg, Exception):
 					raise msg
-			except StopIteration as stop:
+			except (StopIteration, GeneratorExit):
 				self._listeners.remove(listener)
 				for child in self._children:
 					child._listeners.remove(self)
-				return stop.value
-			except GeneratorExit:
-				self._listeners.remove(listener)
-				for child in self._children:
-					child._listeners.remove(self)
-				return None
+				return self._result
 			else:
 				self._listeners.remove(listener)
 				for child in self._children:
@@ -171,15 +169,15 @@ class all_(Awaitable):
 	def step(self, sender, msg):
 		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		if msg is None:
-			return self
+			return self #TODO: Never reached
 
 		if isinstance(msg, Exception):
-			self._results[sender] = msg.value
+			self._result[sender] = msg.value
 
 		if not self._children: # If all children finished and removed themselves from self._children
 			self.remove()
 			stop = StopIteration()
-			stop.value = self._results.values()
+			stop.value = self._result
 			raise stop
 
 		return self
@@ -198,9 +196,11 @@ class any_(Awaitable):
 	def __init__(self, *awaitables):
 		super().__init__("any({})".format(", ".join(str(a) for a in awaitables)))
 
-		if any(awaitable.removed for awaitable in awaitables):
-			super().remove()
-			return
+		for awaitable in awaitables:
+			if awaitable.removed:
+				self._result = awaitable._result
+				super().remove()
+				return
 
 		self._parent = Frame._current
 		if self._parent:
@@ -214,8 +214,8 @@ class any_(Awaitable):
 			child._parent = self
 
 	def __await__(self):
-		if self.removed: # If this awaitable finished before being awaited
-			raise StopIteration()
+		if self.removed: # If this awaitable already finished
+			return self._result
 		while True:
 			try:
 				listener = Frame._current
@@ -227,16 +227,11 @@ class any_(Awaitable):
 				log.debug("{}await {} -> {}".format(str(listener).ljust(10), self, msg))
 				if isinstance(msg, Exception):
 					raise msg
-			except StopIteration as stop:
+			except (StopIteration, GeneratorExit):
 				self._listeners.remove(listener)
 				for child in self._children:
 					child._listeners.remove(self)
-				return stop.value
-			except GeneratorExit:
-				self._listeners.remove(listener)
-				for child in self._children:
-					child._listeners.remove(self)
-				return None
+				return self._result
 			else:
 				self._listeners.remove(listener)
 				for child in self._children:
@@ -244,13 +239,15 @@ class any_(Awaitable):
 	def step(self, sender, msg):
 		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		if msg is None:
-			return self
+			return self #TODO: Never reached
 
 		if isinstance(msg, Exception):
+			if type(msg) == StopIteration:
+				self._result = msg.value
 			self.remove()
 			raise msg
 
-		return self
+		return self #TODO: Never reached
 
 	def remove(self):
 		if not super().remove():
@@ -270,14 +267,6 @@ class sleep(Awaitable):
 		super().__init__("sleep({})".format(seconds))
 		log.debug("{}{}".format(str(Frame._current).ljust(10), self))
 		EventLoop._current.postevent(Event(None, self, None), delay=seconds)
-	def step(self, sender, msg):
-		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
-		if msg and msg.target == self:
-			self.remove()
-			stop = StopIteration()
-			stop.value = msg
-			raise stop
-		return self
 
 class hold(Awaitable):
 	def __init__(self, seconds=0.0):
@@ -350,7 +339,12 @@ class Frame(Awaitable):
 			log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 			awaitable = self._generator.send(msg)
 			log.debug("{}{}.step({}) -> {}".format(str(Frame._current).ljust(10), self, msg, awaitable))
-		except (StopIteration, GeneratorExit): # If done
+		except StopIteration as stop: # If done
+			Frame._current = self._parent # Activate parent
+			self._result = stop.value
+			self.remove()
+			raise
+		except GeneratorExit: # If done
 			Frame._current = self._parent # Activate parent
 			self.remove()
 			raise
