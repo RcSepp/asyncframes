@@ -21,14 +21,62 @@ class EventLoop(metaclass=abc.ABCMeta):
 	_current = None
 
 	@abc.abstractmethod
+	def _run(self):
+		raise NotImplementedError() # pragma: no cover
+	@abc.abstractmethod
+	def _stop(self):
+		raise NotImplementedError() # pragma: no cover
+	@abc.abstractmethod
+	def _post(self, event, delay):
+		raise NotImplementedError() # pragma: no cover
+
 	def run(self, frame):
-		raise NotImplementedError()
-	@abc.abstractmethod
+		if EventLoop._current is not None:
+			raise Exception("Another event loop is already running")
+		EventLoop._current = self
+
+		try:
+			self.mainframe = frame()
+			if self.mainframe._generator is not None:
+				self._run()
+		except:
+			EventLoop._current = None
+			Frame._current = None
+			raise
+		else:
+			EventLoop._current = None
+			Frame._current = None
+
 	def sendevent(self, event):
-		raise NotImplementedError()
-	@abc.abstractmethod
+		# Discard events sent after the event loop has been closed
+		if self != EventLoop._current: return
+
+		if event.target._listeners:
+			def recursive_listener_search(awaitable, listeners):
+				if awaitable._listeners:
+					for listener in awaitable._listeners:
+						recursive_listener_search(listener, listeners)
+				else:
+					listeners.add(awaitable)
+			listeners = set()
+			recursive_listener_search(event.target, listeners)
+			log.debug("Event {} wakes up {}".format(event, listeners))
+		else:
+			log.debug("Ignoring event {}".format(event))
+
+		event.target.process(event.target, event)
+		if self.mainframe.removed: # If the main frame finished
+			log.debug("Main frame finished")
+			self._stop()
+			return False
+
+		return True
+
 	def postevent(self, event, delay=0):
-		raise NotImplementedError()
+		# Discard events sent after the event loop has been closed
+		if self != EventLoop._current: return
+
+		self._post(event, delay)
 
 
 class Awaitable(collections.abc.Awaitable):

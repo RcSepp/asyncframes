@@ -21,7 +21,7 @@
 			"cwd": "${workspaceFolder}/test",
 			"module": "unittest",
 			"args": [
-				"test_asyncframes.Tests"
+				"test_asyncframes.TestAsyncFrames"
 			]
 		}
 	]

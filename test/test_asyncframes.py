@@ -3,7 +3,6 @@ import io
 import logging
 import unittest
 from asyncframes import sleep, define_frame, AwaitableEvent, Event, Frame, Primitive
-from asyncframes.pyqt5_eventloop import EventLoop
 
 @define_frame
 class MyFrame(Frame):
@@ -26,11 +25,22 @@ async def wait(seconds, name):
 	log.debug(name)
 	return "some result"
 
-class Tests (unittest.TestCase):
+EVENTLOOP_CLASS = None
+
+class TestAsyncFrames(unittest.TestCase):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 
-		self.loop = EventLoop()
+		# Create default event loop if no event loop was created by a base class
+		if not hasattr(self, 'loop'):
+			from asyncframes.asyncio_eventloop import EventLoop
+			self.loop = EventLoop()
+		
+		# Announce event loop if different
+		global EVENTLOOP_CLASS
+		if self.loop.__class__ != EVENTLOOP_CLASS:
+			print("Using {}.{}".format(self.loop.__class__.__module__, self.loop.__class__.__name__))
+			EVENTLOOP_CLASS = self.loop.__class__
 
 	def setUp(self):
 		# Create logger for debugging program flow using time stamped log messages
@@ -341,6 +351,14 @@ class Tests (unittest.TestCase):
 		self.assertLogEqual("""
 			0.1: 'raise_event' raised 'my event' with args 'my event args'
 		""")
+
+class TestPyQt5EventLoop(TestAsyncFrames):
+	def __init__(self, *args, **kwargs):
+		# Create PyQt5 event loop
+		from asyncframes.pyqt5_eventloop import EventLoop
+		self.loop = EventLoop()
+
+		super().__init__(*args, **kwargs)
 
 if __name__ == "__main__":
 	unittest.main()
