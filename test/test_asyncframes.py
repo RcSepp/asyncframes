@@ -1,18 +1,9 @@
 import datetime
 import io
 import logging
-import sys
 import unittest
-from PyQt5.QtWidgets import QApplication
 from asyncframes import sleep, define_frame, AwaitableEvent, Event, Frame, Primitive
-from pyqt5_eventloop import EventLoop
-
-# def log(msg=None):
-# 	t = (datetime.datetime.now() - starttime).total_seconds()
-# 	if msg:
-# 		print(round(t, 1), ": ", msg, sep='')
-# 	else:
-# 		print(round(t, 1))
+from asyncframes.pyqt5_eventloop import EventLoop
 
 @define_frame
 class MyFrame(Frame):

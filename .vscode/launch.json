@@ -18,7 +18,7 @@
 			"name": "unittest",
 			"type": "python",
 			"request": "launch",
-			"cwd": "${workspaceFolder}",
+			"cwd": "${workspaceFolder}/test",
 			"module": "unittest",
 			"args": [
 				"test_asyncframes.Tests"
