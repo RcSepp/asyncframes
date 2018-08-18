@@ -1,0 +1,34 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "coverage",
+			"type": "shell",
+			"command": "coverage",
+			"args": [
+				"run",
+				"test/test_asyncframes.py"
+			]
+		},
+		{
+			"label": "build html coverage",
+			"type": "shell",
+			"command": "coverage",
+			"args": [
+				"html"
+			],
+			"dependsOn": "coverage",
+			"problemMatcher": []
+		},
+		{
+			"label": "view html coverage",
+			"type": "shell",
+			"command": "xdg-open",
+			"args": [
+				"${workspaceFolder}/htmlcov/index.html"
+			],
+			"dependsOn": "coverage",
+			"problemMatcher": []
+		}
+	]
+}
