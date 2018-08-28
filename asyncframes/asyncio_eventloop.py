@@ -4,6 +4,7 @@ import asyncframes
 
 class EventLoop(asyncframes.EventLoop):
 	def __init__(self):
+		super().__init__()
 		self.loop = asyncio.get_event_loop()
 
 	def _run(self):

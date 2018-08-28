@@ -30,6 +30,9 @@ class EventLoop(metaclass=abc.ABCMeta):
 	def _post(self, event, delay):
 		raise NotImplementedError() # pragma: no cover
 
+	def __init__(self):
+		self.passive_frame_exception_handler = None
+
 	def run(self, frame):
 		if EventLoop._current is not None:
 			raise Exception("Another event loop is already running")
@@ -39,11 +42,7 @@ class EventLoop(metaclass=abc.ABCMeta):
 			self.mainframe = frame()
 			if self.mainframe._generator is not None:
 				self._run()
-		except:
-			EventLoop._current = None
-			Frame._current = None
-			raise
-		else:
+		finally:
 			EventLoop._current = None
 			Frame._current = None
 
@@ -64,7 +63,14 @@ class EventLoop(metaclass=abc.ABCMeta):
 		else:
 			log.debug("Ignoring event {}".format(event))
 
-		event.target.process(event.target, event)
+		try:
+			event.target.process(event.target, event)
+		except Exception as err:
+			if self.passive_frame_exception_handler:
+				self.passive_frame_exception_handler(err)
+			else:
+				raise
+
 		if self.mainframe.removed: # If the main frame finished
 			log.debug("Main frame finished")
 			self._stop()
@@ -112,9 +118,8 @@ class Awaitable(collections.abc.Awaitable):
 				if isinstance(msg, Exception):
 					raise msg
 			except (StopIteration, GeneratorExit):
-				self._listeners.remove(listener)
 				return self._result
-			else:
+			finally:
 				self._listeners.remove(listener)
 	def step(self, sender, msg):
 		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
@@ -128,20 +133,14 @@ class Awaitable(collections.abc.Awaitable):
 	def process(self, sender, msg):
 		try:
 			msg = self.step(sender, msg)
-		except (StopIteration, GeneratorExit) as stop:
-			if self._listeners:
-				for listener in self._listeners.copy():
-					listener.process(self, stop)
-			else:
-				return #raise stop
-		else:
-			if self._listeners:
-				for listener in self._listeners.copy():
-					listener.process(self, msg)
-		# try:
-		# 	self.step(eventstack, len(eventstack) - 1)
-		# except (StopIteration, GeneratorExit):
-		# 	pass
+		except (StopIteration, GeneratorExit) as err:
+			msg = err # Forward exception to listeners
+		except Exception as err:
+			if not self._listeners: raise
+			msg = err # Forward exception to listeners
+		if self._listeners:
+			for listener in self._listeners.copy():
+				listener.process(self, msg)
 	def __and__(self, other):
 		return all_(self, other)
 	def __or__(self, other):
@@ -206,11 +205,8 @@ class all_(Awaitable):
 				if isinstance(msg, Exception):
 					raise msg
 			except (StopIteration, GeneratorExit):
-				self._listeners.remove(listener)
-				for child in self._children:
-					child._listeners.remove(self)
 				return self._result
-			else:
+			finally:
 				self._listeners.remove(listener)
 				for child in self._children:
 					child._listeners.remove(self)
@@ -220,7 +216,10 @@ class all_(Awaitable):
 			return self #TODO: Never reached
 
 		if isinstance(msg, Exception):
-			self._result[sender] = msg.value
+			if type(msg) == StopIteration:
+				self._result[sender] = msg.value
+			elif type(msg) != GeneratorExit:
+				raise msg
 
 		if not self._children: # If all children finished and removed themselves from self._children
 			self.remove()
@@ -276,11 +275,8 @@ class any_(Awaitable):
 				if isinstance(msg, Exception):
 					raise msg
 			except (StopIteration, GeneratorExit):
-				self._listeners.remove(listener)
-				for child in self._children:
-					child._listeners.remove(self)
 				return self._result
-			else:
+			finally:
 				self._listeners.remove(listener)
 				for child in self._children:
 					child._listeners.remove(self)
@@ -388,17 +384,15 @@ class Frame(Awaitable):
 			awaitable = self._generator.send(msg)
 			log.debug("{}{}.step({}) -> {}".format(str(Frame._current).ljust(10), self, msg, awaitable))
 		except StopIteration as stop: # If done
-			Frame._current = self._parent # Activate parent
 			self._result = stop.value
 			self.remove()
 			raise
-		except GeneratorExit: # If done
-			Frame._current = self._parent # Activate parent
+		except (GeneratorExit, Exception): # If done
 			self.remove()
 			raise
-
-		# Activate parent
-		Frame._current = self._parent
+		finally:
+			# Activate parent
+			Frame._current = self._parent
 
 		return self
 

@@ -6,6 +6,7 @@ import asyncframes
 
 class EventLoop(asyncframes.EventLoop):
 	def __init__(self):
+		super().__init__()
 		self.qt = QApplication.instance() or QApplication([])
 
 		try:

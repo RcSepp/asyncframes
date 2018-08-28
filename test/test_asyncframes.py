@@ -2,7 +2,7 @@ import datetime
 import io
 import logging
 import unittest
-from asyncframes import sleep, define_frame, AwaitableEvent, Event, Frame, Primitive
+from asyncframes import sleep, hold, define_frame, AwaitableEvent, Event, Frame, Primitive
 
 @define_frame
 class MyFrame(Frame):
@@ -35,12 +35,15 @@ class TestAsyncFrames(unittest.TestCase):
 		if not hasattr(self, 'loop'):
 			from asyncframes.asyncio_eventloop import EventLoop
 			self.loop = EventLoop()
-		
+
 		# Announce event loop if different
 		global EVENTLOOP_CLASS
 		if self.loop.__class__ != EVENTLOOP_CLASS:
 			print("Using {}.{}".format(self.loop.__class__.__module__, self.loop.__class__.__name__))
 			EVENTLOOP_CLASS = self.loop.__class__
+
+		# Register event handler for exceptions raised within passive frames
+		self.loop.passive_frame_exception_handler = lambda err: log.debug("Passive frame exception caught: " + repr(err))
 
 	def setUp(self):
 		# Create logger for debugging program flow using time stamped log messages
@@ -350,6 +353,59 @@ class TestAsyncFrames(unittest.TestCase):
 		self.loop.run(main)
 		self.assertLogEqual("""
 			0.1: 'raise_event' raised 'my event' with args 'my event args'
+		""")
+
+	def test_exceptions(self):
+		@Frame
+		async def main():
+			# Catch exception raised from active frame
+			with self.assertRaises(ZeroDivisionError):
+				await raise_immediately()
+			with self.assertRaises(ZeroDivisionError):
+				await (hold() | raise_immediately())
+			with self.assertRaises(ZeroDivisionError):
+				await (hold() & raise_immediately())
+			log.debug(1)
+
+			# Catch exception raised from active frame woken by event
+			with self.assertRaises(ZeroDivisionError):
+				await raise_delayed()
+			with self.assertRaises(ZeroDivisionError):
+				await (hold() | raise_delayed())
+			with self.assertRaises(ZeroDivisionError):
+				await (hold() & raise_delayed())
+			log.debug(2)
+
+			# Catch exception raised from passive frame
+			with self.assertRaises(ZeroDivisionError):
+				raise_immediately()
+			with self.assertRaises(ZeroDivisionError):
+				hold() | raise_immediately()
+			with self.assertRaises(ZeroDivisionError):
+				hold() & raise_immediately()
+			log.debug(3)
+
+			# Raise passive exception woken by event
+			# It will be caught by EventLoop.passive_frame_exception_handler
+			raise_delayed()
+			hold() | raise_delayed()
+			hold() & raise_delayed()
+			await sleep(0.2)
+		@Frame
+		async def raise_immediately():
+			raise ZeroDivisionError()
+		@Frame
+		async def raise_delayed():
+			await sleep(0.1)
+			raise ZeroDivisionError()
+		self.loop.run(main)
+		self.assertLogEqual("""
+			0.0: 1
+			0.3: 2
+			0.3: 3
+			0.4: Passive frame exception caught: ZeroDivisionError()
+			0.4: Passive frame exception caught: ZeroDivisionError()
+			0.4: Passive frame exception caught: ZeroDivisionError()
 		""")
 
 class TestPyQt5EventLoop(TestAsyncFrames):
