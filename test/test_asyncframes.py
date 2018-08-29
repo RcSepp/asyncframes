@@ -2,7 +2,7 @@ import datetime
 import io
 import logging
 import unittest
-from asyncframes import sleep, hold, define_frame, AwaitableEvent, Event, Frame, Primitive
+from asyncframes import sleep, hold, animate, define_frame, AwaitableEvent, Event, Frame, Primitive
 
 @define_frame
 class MyFrame(Frame):
@@ -71,7 +71,7 @@ class TestAsyncFrames(unittest.TestCase):
 		self.assertEqual(expected, self.logstream.getvalue())
 
 	def test_simple(self):
-		@MyFrame
+		@Frame
 		async def main():
 			await wait(0.1, '1')
 		self.loop.run(main)
@@ -407,6 +407,27 @@ class TestAsyncFrames(unittest.TestCase):
 			0.4: Passive frame exception caught: ZeroDivisionError()
 			0.4: Passive frame exception caught: ZeroDivisionError()
 		""")
+
+	def test_animate(self):
+		@Frame
+		async def a():
+			await animate(0.1, lambda f: None)
+		@Frame
+		async def main():
+			await a()
+		self.loop.run(main)
+
+	def test_unfinished_await(self):
+		@MyFrame
+		async def frame():
+			await subframe()
+			await (subframe() | hold())
+			await (subframe() & sleep(0.001))
+		@MyFrame
+		async def subframe():
+			await sleep()
+			await sleep()
+		self.loop.run(frame)
 
 class TestPyQt5EventLoop(TestAsyncFrames):
 	def __init__(self, *args, **kwargs):
