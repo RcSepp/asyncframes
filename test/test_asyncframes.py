@@ -2,7 +2,7 @@ import datetime
 import io
 import logging
 import unittest
-from asyncframes import sleep, hold, animate, define_frame, AwaitableEvent, Event, Frame, Primitive
+from asyncframes import sleep, hold, animate, define_frame, AwaitableEvent, Frame, Primitive
 
 @define_frame
 class MyFrame(Frame):
@@ -351,7 +351,7 @@ class TestAsyncFrames(unittest.TestCase):
 		@Frame
 		async def raise_event(self, seconds, awaitable_event):
 			await sleep(seconds)
-			Event(self, awaitable_event, 'my event args').process()
+			awaitable_event.send(self, 'my event args')
 
 		self.loop.run(main)
 		self.assertLogEqual("""

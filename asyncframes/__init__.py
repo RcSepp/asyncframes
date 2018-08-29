@@ -122,15 +122,9 @@ class Awaitable(collections.abc.Awaitable):
 			return self._result
 		finally:
 			self._listeners.remove(listener)
+	@abc.abstractmethod
 	def step(self, sender, msg):
-		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
-		if msg and msg.target == self:
-			self._result = msg
-			self.remove()
-			stop = StopIteration()
-			stop.value = msg
-			raise stop
-		return self #TODO: Never reached
+		return NotImplementedError
 	def process(self, sender, msg):
 		Frame._current = self # Activate self
 		try:
@@ -149,12 +143,22 @@ class Awaitable(collections.abc.Awaitable):
 		return any_(self, other)
 
 class AwaitableEvent(Awaitable):
-	def __init__(self, name, signal=None, signal_sender=None):
+	def __init__(self, name, autoremove=False):
 		super().__init__(name)
-		if signal:
-			signal.connect(lambda e=None: Event(signal_sender, self, e).post())
+		self.autoremove = autoremove
 	def remove(self):
-		return True  # Don't remove awaitable events, since they may be raised multiple times
+		return super().remove() if self.autoremove else True
+	def step(self, sender, msg):
+		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
+		self._result = msg
+		self.remove()
+		stop = StopIteration()
+		stop.value = msg
+		raise stop
+	def send(self, sender, args=None):
+		EventLoop._current.sendevent(Event(sender, self, args))
+	def post(self, sender, args=None):
+		EventLoop._current.postevent(Event(sender, self, args))
 
 class Event():
 	def __init__(self, sender, target, args):
@@ -164,12 +168,6 @@ class Event():
 
 	def __str__(self):
 		return str(self.target)
-
-	def post(self):
-		EventLoop._current.postevent(self)
-
-	def process(self):
-		return EventLoop._current.sendevent(self)
 
 class all_(Awaitable):
 	def __init__(self, *awaitables):
@@ -190,9 +188,8 @@ class all_(Awaitable):
 			if child._parent:
 				child._parent._children.remove(child)
 			child._parent = self
-		
-		self._num_children = len(self._children)
 
+		self._num_children = len(self._children)
 
 	def __await__(self):
 		if self.removed: # If this awaitable already finished
@@ -304,28 +301,28 @@ class any_(Awaitable):
 		return True
 
 
-class sleep(Awaitable):
+class sleep(AwaitableEvent):
 	def __init__(self, seconds=0.0):
 		if seconds < 0:
 			raise ValueError()
-		super().__init__("sleep({})".format(seconds))
+		super().__init__("sleep({})".format(seconds), autoremove=True)
 		log.debug("{}{}".format(str(Frame._current).ljust(10), self))
-		EventLoop._current.postevent(Event(None, self, None), delay=seconds)
+		EventLoop._current.postevent(Event(self, self, None), delay=seconds)
 
-class hold(Awaitable):
+class hold(AwaitableEvent):
 	def __init__(self, seconds=0.0):
-		super().__init__("hold()")
+		super().__init__("hold()", autoremove=True)
 	def step(self, sender, msg):
 		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		return self # hold can't be raised
 
-class animate(Awaitable):
+class animate(AwaitableEvent):
 	def __init__(self, seconds, callback):
-		super().__init__("animate()")
+		super().__init__("animate()", autoremove=True)
 		self.seconds = seconds
 		self.callback = callback
 		self.startTime = datetime.datetime.now()
-		EventLoop._current.postevent(Event(None, self, None))
+		self.post(Event(self, self, None))
 	def step(self, sender, msg):
 		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		t = (datetime.datetime.now() - self.startTime).total_seconds()
@@ -341,7 +338,7 @@ class animate(Awaitable):
 			self.callback(t / self.seconds)
 
 			# Reraise event
-			EventLoop._current.postevent(Event(None, self, None))
+			EventLoop._current.postevent(Event(self, self, None))
 			return self
 
 
@@ -435,7 +432,7 @@ class Frame(Awaitable):
 			self._primitives[-1].remove()
 
 		# Post frame removed event
-		Event(self, self, None).post()
+		EventLoop._current.postevent(Event(self, self, None))
 
 		# Stop framefunc
 		if self._generator: # If framefunc is a coroutine
