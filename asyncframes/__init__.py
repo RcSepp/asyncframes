@@ -109,19 +109,19 @@ class Awaitable(collections.abc.Awaitable):
 	def __await__(self):
 		if self.removed: # If this awaitable already finished
 			return self._result
-		while True:
-			try:
-				listener = Frame._current
-				self._listeners.add(listener)
+		listener = Frame._current
+		self._listeners.add(listener)
+		try:
+			while True:
 				log.debug("{}await {}".format(str(listener).ljust(10), self))
 				msg = yield self
 				log.debug("{}await {} -> {}".format(str(listener).ljust(10), self, msg))
 				if isinstance(msg, Exception):
 					raise msg
-			except (StopIteration, GeneratorExit):
-				return self._result
-			finally:
-				self._listeners.remove(listener)
+		except (StopIteration, GeneratorExit):
+			return self._result
+		finally:
+			self._listeners.remove(listener)
 	def step(self, sender, msg):
 		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		if msg and msg.target == self:
@@ -190,32 +190,32 @@ class all_(Awaitable):
 			if child._parent:
 				child._parent._children.remove(child)
 			child._parent = self
+		
+		self._num_children = len(self._children)
 
 
 	def __await__(self):
 		if self.removed: # If this awaitable already finished
 			return self._result
-		while True:
-			try:
-				listener = Frame._current
-				self._listeners.add(listener)
-				for child in self._children:
-					child._listeners.add(self)
+		listener = Frame._current
+		self._listeners.add(listener)
+		for child in self._children:
+			child._listeners.add(self)
+		try:
+			while True:
 				log.debug("{}await {}".format(str(listener).ljust(10), self))
 				msg = yield self
 				log.debug("{}await {} -> {}".format(str(listener).ljust(10), self, msg))
 				if isinstance(msg, Exception):
 					raise msg
-			except (StopIteration, GeneratorExit):
-				return self._result
-			finally:
-				self._listeners.remove(listener)
-				for child in self._children:
-					child._listeners.remove(self)
+		except (StopIteration, GeneratorExit):
+			return self._result
+		finally:
+			self._listeners.remove(listener)
+			for child in self._children:
+				child._listeners.remove(self)
 	def step(self, sender, msg):
 		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
-		if msg is None:
-			return self #TODO: Never reached
 
 		if isinstance(msg, Exception):
 			if type(msg) == StopIteration:
@@ -223,7 +223,7 @@ class all_(Awaitable):
 			elif type(msg) != GeneratorExit:
 				raise msg
 
-		if not self._children: # If all children finished and removed themselves from self._children
+		if len(self._result) == self._num_children: # If _num_children results have been received
 			self.remove()
 			stop = StopIteration()
 			stop.value = self._result
@@ -265,27 +265,25 @@ class any_(Awaitable):
 	def __await__(self):
 		if self.removed: # If this awaitable already finished
 			return self._result
-		while True:
-			try:
-				listener = Frame._current
-				self._listeners.add(listener)
-				for child in self._children:
-					child._listeners.add(self)
+		listener = Frame._current
+		self._listeners.add(listener)
+		for child in self._children:
+			child._listeners.add(self)
+		try:
+			while True:
 				log.debug("{}await {}".format(str(listener).ljust(10), self))
 				msg = yield self
 				log.debug("{}await {} -> {}".format(str(listener).ljust(10), self, msg))
 				if isinstance(msg, Exception):
 					raise msg
-			except (StopIteration, GeneratorExit):
-				return self._result
-			finally:
-				self._listeners.remove(listener)
-				for child in self._children:
-					child._listeners.remove(self)
+		except (StopIteration, GeneratorExit):
+			return self._result
+		finally:
+			self._listeners.remove(listener)
+			for child in self._children:
+				child._listeners.remove(self)
 	def step(self, sender, msg):
 		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
-		if msg is None:
-			return self #TODO: Never reached
 
 		if isinstance(msg, Exception):
 			if type(msg) == StopIteration:
