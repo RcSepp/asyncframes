@@ -1,5 +1,6 @@
 import abc
 import collections.abc
+import datetime
 import inspect
 import logging
 import sys
@@ -315,9 +316,33 @@ class sleep(Awaitable):
 class hold(Awaitable):
 	def __init__(self, seconds=0.0):
 		super().__init__("hold()")
-	def step(self, eventstack, eventstackptr):
-		log.debug("{}{}.step({}, {})".format(str(Frame._current).ljust(10), self, eventstack, eventstackptr))
+	def step(self, sender, msg):
+		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		return self # hold can't be raised
+
+class animate(Awaitable):
+	def __init__(self, seconds, callback):
+		super().__init__("animate()")
+		self.seconds = seconds
+		self.callback = callback
+		self.startTime = datetime.datetime.now()
+		EventLoop._current.postevent(Event(None, self, None))
+	def step(self, sender, msg):
+		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
+		t = (datetime.datetime.now() - self.startTime).total_seconds()
+
+		if t >= self.seconds:
+			self.callback(1.0)
+			self._result = msg
+			self.remove()
+			stop = StopIteration()
+			stop.value = msg
+			raise stop
+		else:
+			self.callback(t / self.seconds)
+
+			# Reraise event
+			EventLoop._current.postevent(Event(None, self, None))
 
 
 class Frame(Awaitable):
@@ -350,7 +375,7 @@ class Frame(Awaitable):
 		self._generator = None
 
 	def create(self, framefunc, *frameargs, **framekwargs):
-		if not self.removed and self._generator is None:
+		if framefunc and not self.removed and self._generator is None:
 			self.__name__ = framefunc.__name__
 
 			# Activate self
