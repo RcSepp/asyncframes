@@ -132,6 +132,7 @@ class Awaitable(collections.abc.Awaitable):
 			raise stop
 		return self #TODO: Never reached
 	def process(self, sender, msg):
+		Frame._current = self # Activate self
 		try:
 			msg = self.step(sender, msg)
 		except (StopIteration, GeneratorExit) as err:
@@ -343,6 +344,7 @@ class animate(Awaitable):
 
 			# Reraise event
 			EventLoop._current.postevent(Event(None, self, None))
+			return self
 
 
 class Frame(Awaitable):
@@ -384,24 +386,24 @@ class Frame(Awaitable):
 			hasself = 'self' in inspect.signature(framefunc).parameters
 			self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
 
-			# Activate parent
-			Frame._current = self._parent
-
 			if inspect.isawaitable(self._generator): # If framefunc is a coroutine
 				# Start coroutine
 				try:
 					self.step(None, None)
 				except (StopIteration, GeneratorExit):
 					pass
+				finally:
+					# Activate parent
+					Frame._current = self._parent
+			else:
+				# Activate parent
+				Frame._current = self._parent
 
 	def step(self, sender, msg):
 		if self.removed:
 			raise StopIteration()
 		if self._generator is None:
 			return self
-
-		# Activate self
-		Frame._current = self
 
 		# Advance generator
 		try:
@@ -415,9 +417,6 @@ class Frame(Awaitable):
 		except (GeneratorExit, Exception): # If done
 			self.remove()
 			raise
-		finally:
-			# Activate parent
-			Frame._current = self._parent
 
 		return self
 
