@@ -343,8 +343,11 @@ class TestAsyncFrames(unittest.TestCase):
 		async def main():
 			ae = AwaitableEvent('my event')
 			raise_event(0.1, ae)
+			raise_event(0.2, ae)
 			e = await ae
 			log.debug("'%s' raised '%s' with args '%s'", e.sender, e.target, e.args)
+			e = await ae
+			log.debug("'%s' reraised '%s' with args '%s'", e.sender, e.target, e.args)
 		@Frame
 		async def raise_event(self, seconds, awaitable_event):
 			await sleep(seconds)
@@ -353,6 +356,7 @@ class TestAsyncFrames(unittest.TestCase):
 		self.loop.run(main)
 		self.assertLogEqual("""
 			0.1: 'raise_event' raised 'my event' with args 'my event args'
+			0.2: 'raise_event' reraised 'my event' with args 'my event args'
 		""")
 
 	def test_exceptions(self):
@@ -422,7 +426,7 @@ class TestAsyncFrames(unittest.TestCase):
 		async def frame():
 			await subframe()
 			await (subframe() | hold())
-			await (subframe() & sleep(0.001))
+			await (subframe() & sleep())
 		@MyFrame
 		async def subframe():
 			await sleep()
