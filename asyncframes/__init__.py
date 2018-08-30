@@ -88,7 +88,7 @@ class Awaitable(collections.abc.Awaitable):
 		try:
 			while True:
 				msg = yield self
-				if isinstance(msg, Exception):
+				if isinstance(msg, BaseException):
 					raise msg
 		except (StopIteration, GeneratorExit):
 			return self._result
@@ -172,7 +172,7 @@ class all_(Awaitable):
 		try:
 			while True:
 				msg = yield self
-				if isinstance(msg, Exception):
+				if isinstance(msg, BaseException):
 					raise msg
 		except (StopIteration, GeneratorExit):
 			return self._result
@@ -182,7 +182,7 @@ class all_(Awaitable):
 				child._listeners.remove(self)
 
 	def step(self, sender, msg):
-		if isinstance(msg, Exception):
+		if isinstance(msg, BaseException):
 			if type(msg) == StopIteration:
 				self._result[sender] = msg.value
 			elif type(msg) != GeneratorExit:
@@ -234,7 +234,7 @@ class any_(Awaitable):
 		try:
 			while True:
 				msg = yield self
-				if isinstance(msg, Exception):
+				if isinstance(msg, BaseException):
 					raise msg
 		except (StopIteration, GeneratorExit):
 			return self._result
@@ -244,7 +244,7 @@ class any_(Awaitable):
 				child._listeners.remove(self)
 
 	def step(self, sender, msg):
-		if isinstance(msg, Exception):
+		if isinstance(msg, BaseException):
 			if type(msg) == StopIteration:
 				self._result = msg.value
 			self.remove()
@@ -351,7 +351,7 @@ class Frame(Awaitable):
 
 	def step(self, sender, msg):
 		if self.removed:
-			raise StopIteration()
+			raise GeneratorExit
 
 		if self._generator is not None:
 			# Advance generator
