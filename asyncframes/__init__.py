@@ -194,8 +194,6 @@ class all_(Awaitable):
 			stop.value = self._result
 			raise stop
 
-		return self
-
 	def remove(self):
 		if not super().remove():
 			return False
@@ -252,8 +250,6 @@ class any_(Awaitable):
 			self.remove()
 			raise msg
 
-		return self #TODO: Never reached
-
 	def remove(self):
 		if not super().remove():
 			return False
@@ -275,7 +271,7 @@ class hold(AwaitableEvent):
 	def __init__(self, seconds=0.0):
 		super().__init__("hold()", autoremove=True)
 	def step(self, sender, msg):
-		return self # hold can't be raised
+		pass # hold can't be raised
 
 class animate(AwaitableEvent):
 	def __init__(self, seconds, callback):
@@ -299,7 +295,6 @@ class animate(AwaitableEvent):
 
 			# Reraise event
 			EventLoop._current.postevent(Event(self, self, None))
-			return self
 
 
 class Frame(Awaitable):
@@ -357,21 +352,18 @@ class Frame(Awaitable):
 	def step(self, sender, msg):
 		if self.removed:
 			raise StopIteration()
-		if self._generator is None:
-			return self
 
-		# Advance generator
-		try:
-			awaitable = self._generator.send(msg)
-		except StopIteration as stop: # If done
-			self._result = stop.value
-			self.remove()
-			raise
-		except (GeneratorExit, Exception): # If done
-			self.remove()
-			raise
-
-		return self
+		if self._generator is not None:
+			# Advance generator
+			try:
+				self._generator.send(msg)
+			except StopIteration as stop: # If done
+				self._result = stop.value
+				self.remove()
+				raise
+			except (GeneratorExit, Exception): # If done
+				self.remove()
+				raise
 
 	def remove(self):
 		if not super().remove():
