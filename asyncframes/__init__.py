@@ -6,30 +6,18 @@ import logging
 import sys
 
 
-log = logging.getLogger(__name__)
-if False:
-	log.setLevel(logging.DEBUG)
-
-
-loghandler = logging.StreamHandler(sys.stdout)
-loghandler.setLevel(logging.DEBUG)
-formatter = logging.Formatter("%(message)s")
-loghandler.setFormatter(formatter)
-log.addHandler(loghandler)
-
-
 class EventLoop(metaclass=abc.ABCMeta):
 	_current = None
 
 	@abc.abstractmethod
 	def _run(self):
-		raise NotImplementedError() # pragma: no cover
+		raise NotImplementedError # pragma: no cover
 	@abc.abstractmethod
 	def _stop(self):
-		raise NotImplementedError() # pragma: no cover
+		raise NotImplementedError # pragma: no cover
 	@abc.abstractmethod
 	def _post(self, event, delay):
-		raise NotImplementedError() # pragma: no cover
+		raise NotImplementedError # pragma: no cover
 
 	def __init__(self):
 		self.passive_frame_exception_handler = None
@@ -51,19 +39,6 @@ class EventLoop(metaclass=abc.ABCMeta):
 		# Discard events sent after the event loop has been closed
 		if self != EventLoop._current: return
 
-		if event.target._listeners:
-			def recursive_listener_search(awaitable, listeners):
-				if awaitable._listeners:
-					for listener in awaitable._listeners:
-						recursive_listener_search(listener, listeners)
-				else:
-					listeners.add(awaitable)
-			listeners = set()
-			recursive_listener_search(event.target, listeners)
-			log.debug("Event {} wakes up {}".format(event, listeners))
-		else:
-			log.debug("Ignoring event {}".format(event))
-
 		try:
 			event.target.process(event.target, event)
 		except Exception as err:
@@ -73,7 +48,6 @@ class EventLoop(metaclass=abc.ABCMeta):
 				raise
 
 		if self.mainframe.removed: # If the main frame finished
-			log.debug("Main frame finished")
 			self._stop()
 			return False
 
@@ -97,7 +71,7 @@ class Awaitable(collections.abc.Awaitable):
 		if self._removed:
 			return False
 		self._removed = True
-		#log.debug("REMOVING {}".format(self))
+		del self
 		return True
 	@property
 	def removed(self):
@@ -113,9 +87,7 @@ class Awaitable(collections.abc.Awaitable):
 		self._listeners.add(listener)
 		try:
 			while True:
-				log.debug("{}await {}".format(str(listener).ljust(10), self))
 				msg = yield self
-				log.debug("{}await {} -> {}".format(str(listener).ljust(10), self, msg))
 				if isinstance(msg, Exception):
 					raise msg
 		except (StopIteration, GeneratorExit):
@@ -124,7 +96,7 @@ class Awaitable(collections.abc.Awaitable):
 			self._listeners.remove(listener)
 	@abc.abstractmethod
 	def step(self, sender, msg):
-		return NotImplementedError
+		raise NotImplementedError # pragma: no cover
 	def process(self, sender, msg):
 		Frame._current = self # Activate self
 		try:
@@ -149,7 +121,6 @@ class AwaitableEvent(Awaitable):
 	def remove(self):
 		return super().remove() if self.autoremove else True
 	def step(self, sender, msg):
-		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		self._result = msg
 		self.remove()
 		stop = StopIteration()
@@ -200,9 +171,7 @@ class all_(Awaitable):
 			child._listeners.add(self)
 		try:
 			while True:
-				log.debug("{}await {}".format(str(listener).ljust(10), self))
 				msg = yield self
-				log.debug("{}await {} -> {}".format(str(listener).ljust(10), self, msg))
 				if isinstance(msg, Exception):
 					raise msg
 		except (StopIteration, GeneratorExit):
@@ -211,9 +180,8 @@ class all_(Awaitable):
 			self._listeners.remove(listener)
 			for child in self._children:
 				child._listeners.remove(self)
-	def step(self, sender, msg):
-		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 
+	def step(self, sender, msg):
 		if isinstance(msg, Exception):
 			if type(msg) == StopIteration:
 				self._result[sender] = msg.value
@@ -235,7 +203,6 @@ class all_(Awaitable):
 			child.remove()
 		if self._parent:
 			self._parent._children.remove(self)
-		#del self
 		return True
 
 class any_(Awaitable):
@@ -268,9 +235,7 @@ class any_(Awaitable):
 			child._listeners.add(self)
 		try:
 			while True:
-				log.debug("{}await {}".format(str(listener).ljust(10), self))
 				msg = yield self
-				log.debug("{}await {} -> {}".format(str(listener).ljust(10), self, msg))
 				if isinstance(msg, Exception):
 					raise msg
 		except (StopIteration, GeneratorExit):
@@ -279,9 +244,8 @@ class any_(Awaitable):
 			self._listeners.remove(listener)
 			for child in self._children:
 				child._listeners.remove(self)
-	def step(self, sender, msg):
-		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 
+	def step(self, sender, msg):
 		if isinstance(msg, Exception):
 			if type(msg) == StopIteration:
 				self._result = msg.value
@@ -297,7 +261,6 @@ class any_(Awaitable):
 			child.remove()
 		if self._parent:
 			self._parent._children.remove(self)
-		#del self
 		return True
 
 
@@ -306,14 +269,12 @@ class sleep(AwaitableEvent):
 		if seconds < 0:
 			raise ValueError()
 		super().__init__("sleep({})".format(seconds), autoremove=True)
-		log.debug("{}{}".format(str(Frame._current).ljust(10), self))
 		EventLoop._current.postevent(Event(self, self, None), delay=seconds)
 
 class hold(AwaitableEvent):
 	def __init__(self, seconds=0.0):
 		super().__init__("hold()", autoremove=True)
 	def step(self, sender, msg):
-		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		return self # hold can't be raised
 
 class animate(AwaitableEvent):
@@ -324,7 +285,6 @@ class animate(AwaitableEvent):
 		self.startTime = datetime.datetime.now()
 		self.post(Event(self, self, None))
 	def step(self, sender, msg):
-		log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 		t = (datetime.datetime.now() - self.startTime).total_seconds()
 
 		if t >= self.seconds:
@@ -402,9 +362,7 @@ class Frame(Awaitable):
 
 		# Advance generator
 		try:
-			log.debug("{}{}.step({})".format(str(Frame._current).ljust(10), self, msg))
 			awaitable = self._generator.send(msg)
-			log.debug("{}{}.step({}) -> {}".format(str(Frame._current).ljust(10), self, msg, awaitable))
 		except StopIteration as stop: # If done
 			self._result = stop.value
 			self.remove()
