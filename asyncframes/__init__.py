@@ -29,7 +29,7 @@ class EventLoop(metaclass=abc.ABCMeta):
 
 		try:
 			self.mainframe = frame()
-			if self.mainframe._generator is not None:
+			if not self.mainframe.removed:
 				self._run()
 		finally:
 			EventLoop._current = None
