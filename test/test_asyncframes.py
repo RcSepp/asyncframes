@@ -2,16 +2,14 @@ import datetime
 import io
 import logging
 import unittest
-from asyncframes import sleep, hold, animate, define_frame, AwaitableEvent, Frame, Primitive
+from asyncframes import sleep, hold, animate, EventSource, Frame, Primitive
 
-@define_frame
 class MyFrame(Frame):
 	@staticmethod
 	def mystaticmethod():
 		log.debug('static method called')
 	classvar = 'class variable'
 
-@define_frame
 class MyFrame2(Frame):
 	pass
 
@@ -80,10 +78,18 @@ class TestAsyncFrames(unittest.TestCase):
 		""")
 
 	def test_regular_function_mainframe(self):
-		@MyFrame
-		def main():
-			pass
+		@Frame
+		async def remove_after(frame, seconds):
+			await sleep(seconds)
+			frame.remove()
+		@Frame
+		def main(self):
+			remove_after(self, 0.1)
 		self.loop.run(main)
+		log.debug('done')
+		self.assertLogEqual("""
+			0.1: done
+		""")
 
 	def test_negative_sleep_duration(self):
 		@MyFrame
@@ -319,10 +325,10 @@ class TestAsyncFrames(unittest.TestCase):
 		async def main():
 			s = sleep(0.1)
 			w = wait(0.1, '1')
-			log.debug((await sleep(0.2)).target)
-			log.debug((await s).target)
+			log.debug((await sleep(0.2)).source)
+			log.debug((await s).source)
 			log.debug(await w)
-			log.debug((await (s | w)).target)
+			log.debug((await (s | w)).source)
 			for k, v in (await (s & w)).items():
 				log.debug("{}: {}".format(k, v))
 			log.debug('done')
@@ -341,13 +347,13 @@ class TestAsyncFrames(unittest.TestCase):
 	def test_custom_event(self):
 		@Frame
 		async def main():
-			ae = AwaitableEvent('my event')
+			ae = EventSource('my event')
 			raise_event(0.1, ae)
 			raise_event(0.2, ae)
 			e = await ae
-			log.debug("'%s' raised '%s' with args '%s'", e.sender, e.target, e.args)
+			log.debug("'%s' raised '%s' with args '%s'", e.sender, e.source, e.args)
 			e = await ae
-			log.debug("'%s' reraised '%s' with args '%s'", e.sender, e.target, e.args)
+			log.debug("'%s' reraised '%s' with args '%s'", e.sender, e.source, e.args)
 		@Frame
 		async def raise_event(self, seconds, awaitable_event):
 			await sleep(seconds)
