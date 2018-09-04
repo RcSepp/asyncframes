@@ -43,11 +43,9 @@ Frames can be removed in three ways:
 Installation
 ------------
 
-*asyncframes* can be installed via `pip`:
+*asyncframes* can be installed via `pip`: ::
 
-```
-pip install asyncframes
-```
+    pip install asyncframes
 
 *asyncframes* requires an event loop to suspend execution without blocking the
 operating system. The default event loop is ``asyncframes.asyncio_eventloop.EventLoop``.
@@ -60,55 +58,49 @@ framework's event loop should be reused for *asyncframes* by implementing the
 Examples
 --------
 
-Here is a minimal example of using *asyncframes*:
+Here is a minimal example of using *asyncframes*: ::
 
-```
-from asyncframes import Frame
-from asyncframes.asyncio_eventloop import EventLoop
+    from asyncframes import Frame
+    from asyncframes.asyncio_eventloop import EventLoop
 
-@Frame
-async def main_frame():
-    print("Hello World!")
+    @Frame
+    async def main_frame():
+        print("Hello World!")
 
-loop = EventLoop()
-loop.run(main_frame)
-```
+    loop = EventLoop()
+    loop.run(main_frame)
 
-Here is an example of suspending a frame:
+Here is an example of suspending a frame: ::
 
-```
-from asyncframes import Frame, sleep
-from asyncframes.asyncio_eventloop import EventLoop
+    from asyncframes import Frame, sleep
+    from asyncframes.asyncio_eventloop import EventLoop
 
-@Frame
-async def main_frame():
-    for i in range(5):
-        await sleep(1)
-        print(i + 1)
+    @Frame
+    async def main_frame():
+        for i in range(5):
+            await sleep(1)
+            print(i + 1)
 
-loop = EventLoop()
-loop.run(main_frame)
-```
+    loop = EventLoop()
+    loop.run(main_frame)
 
-Here is an example of running two frames in parallel:
+Here is an example of running two frames in parallel: ::
 
-```
-from asyncframes import Frame, sleep
-from asyncframes.asyncio_eventloop import EventLoop
+    from asyncframes import Frame, sleep
+    from asyncframes.asyncio_eventloop import EventLoop
 
-@Frame
-async def counter(c):
-    for i in range(5):
-        await sleep(1)
-        print(c)
+    @Frame
+    async def counter(c):
+        for i in range(5):
+            await sleep(1)
+            print(c)
 
-@Frame
-async def main_frame():
-    a = counter('a') # Start counter 'a'
-    await sleep(0.5) # Wait 0.5 seconds
-    b = counter('b') # Start counter 'b'
-    await (a & b) # Wait until both counters finish
+    @Frame
+    async def main_frame():
+        a = counter('a') # Start counter 'a'
+        await sleep(0.5) # Wait 0.5 seconds
+        b = counter('b') # Start counter 'b'
+        await (a & b) # Wait until both counters finish
 
-loop = EventLoop()
-loop.run(main_frame)
-```
+    loop = EventLoop()
+    loop.run(main_frame)
