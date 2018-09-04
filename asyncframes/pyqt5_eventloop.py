@@ -8,7 +8,7 @@ from PyQt5.QtCore import QTimer
 import asyncframes
 
 
-class EventLoop(asyncframes.EventLoop):
+class EventLoop(asyncframes.AbstractEventLoop):
     def __init__(self):
         super().__init__()
         self.qt = QApplication.instance() or QApplication([])

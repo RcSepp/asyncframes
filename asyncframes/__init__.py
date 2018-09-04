@@ -11,12 +11,12 @@ import sys
 
 
 __all__ = [
-    'all_', 'animate', 'any_', 'Awaitable', 'Event', 'EventLoop',
+    'all_', 'animate', 'any_', 'Awaitable', 'Event', 'AbstractEventLoop',
     'EventSource', 'Frame', 'hold', 'Primitive', 'sleep'
 ]
 
 
-class EventLoop(metaclass=abc.ABCMeta):
+class AbstractEventLoop(metaclass=abc.ABCMeta):
     """Abstract base class of event loops."""
 
     _current = None
@@ -35,21 +35,21 @@ class EventLoop(metaclass=abc.ABCMeta):
         self.passive_frame_exception_handler = None
 
     def run(self, frame):
-        if EventLoop._current is not None:
+        if AbstractEventLoop._current is not None:
             raise Exception("Another event loop is already running")
-        EventLoop._current = self
+        AbstractEventLoop._current = self
 
         try:
             self.mainframe = frame()
             if not self.mainframe.removed:
                 self._run()
         finally:
-            EventLoop._current = None
+            AbstractEventLoop._current = None
             Frame._current = None
 
     def sendevent(self, event):
         # Discard events sent after the event loop has been closed
-        if self != EventLoop._current: return
+        if self != AbstractEventLoop._current: return
 
         try:
             event.source.process(event.source, event)
@@ -67,7 +67,7 @@ class EventLoop(metaclass=abc.ABCMeta):
 
     def postevent(self, event, delay=0):
         # Discard events sent after the event loop has been closed
-        if self != EventLoop._current: return
+        if self != AbstractEventLoop._current: return
 
         self._post(event, delay)
 
@@ -226,7 +226,7 @@ class EventSource(Awaitable):
             args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event
         """
 
-        EventLoop._current.sendevent(Event(sender, self, args))
+        AbstractEventLoop._current.sendevent(Event(sender, self, args))
     def invoke(self, sender, args=None):
         """Enqueue an event in the event loop.
 
@@ -235,7 +235,7 @@ class EventSource(Awaitable):
             args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event
         """
 
-        EventLoop._current.postevent(Event(sender, self, args))
+        AbstractEventLoop._current.postevent(Event(sender, self, args))
 
 class Event():
     """Data structure, containing information about the occurance of an event.
@@ -439,7 +439,7 @@ class sleep(EventSource):
         super().__init__("sleep({})".format(seconds), autoremove=True)
 
         # Raise event
-        EventLoop._current.postevent(Event(self, self, None), delay=seconds)
+        AbstractEventLoop._current.postevent(Event(self, self, None), delay=seconds)
 
 class hold(EventSource):
     """An awaitable used for suspending execution indefinitely.
@@ -470,7 +470,7 @@ class animate(EventSource):
         self.startTime = datetime.datetime.now()
 
         # Raise event
-        EventLoop._current.postevent(Event(self, self, None))
+        AbstractEventLoop._current.postevent(Event(self, self, None))
 
     def step(self, sender, msg):
         """Re-invoke the animation event until the timeout is reached."""
@@ -487,7 +487,7 @@ class animate(EventSource):
             self.callback(t / self.seconds)
 
             # Reraise event
-            EventLoop._current.postevent(Event(self, self, None))
+            AbstractEventLoop._current.postevent(Event(self, self, None))
 
 
 class Frame(Awaitable):
@@ -607,7 +607,7 @@ class Frame(Awaitable):
             self._primitives[-1].remove()
 
         # Post frame removed event
-        EventLoop._current.postevent(Event(self, self, None))
+        AbstractEventLoop._current.postevent(Event(self, self, None))
 
         # Stop framefunc
         if self._generator: # If framefunc is a coroutine
