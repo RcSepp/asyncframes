@@ -11,6 +11,6 @@ setup(
     description='Object oriented coroutines for everyone',
     author='RcSepp',
     author_email='rcsepp@hotmail.com',
-    #url='TODO',
-    #license='TODO'
+    license='MIT'
+    #url='TODO'
 )
