@@ -1,3 +1,7 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) Sebastian Klaassen. All Rights Reserved.
+# Distributed under the MIT License. See LICENSE file for more info.
+
 import datetime
 import io
 import logging
