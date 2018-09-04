@@ -98,7 +98,7 @@ class TestAsyncFrames(unittest.TestCase):
                 sleep(-1)
         self.loop.run(main)
 
-    def test_howtoyield_1(self):
+    def test_await_order_1(self):
         @MyFrame
         async def main():
             wait(0.1, '1')
@@ -109,7 +109,7 @@ class TestAsyncFrames(unittest.TestCase):
             0.2: 2
         """)
 
-    def test_howtoyield_2(self):
+    def test_await_order_2(self):
         @MyFrame
         async def main():
             await wait(0.1, '1')
@@ -120,7 +120,7 @@ class TestAsyncFrames(unittest.TestCase):
             0.3: 2
         """)
 
-    def test_howtoyield_3(self):
+    def test_await_order_3(self):
         @MyFrame
         async def main():
             await wait(0.1, '1')
@@ -130,7 +130,7 @@ class TestAsyncFrames(unittest.TestCase):
             0.1: 1
         """)
 
-    def test_howtoyield_4(self):
+    def test_await_order_4(self):
         @MyFrame
         async def main():
             wait(0.1, '1')
@@ -139,7 +139,7 @@ class TestAsyncFrames(unittest.TestCase):
         self.assertLogEqual("""
         """)
 
-    def test_howtoyield_5(self):
+    def test_await_order_5(self):
         @MyFrame
         async def main():
             w1 = wait(0.1, '1')
@@ -151,7 +151,7 @@ class TestAsyncFrames(unittest.TestCase):
             0.2: 2
         """)
 
-    def test_howtoyield_6(self):
+    def test_await_order_6(self):
         @MyFrame
         async def main():
             w1 = wait(0.1, '1')
