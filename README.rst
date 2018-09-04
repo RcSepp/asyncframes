@@ -1,5 +1,6 @@
+=====================================================
 asyncframes - Object oriented coroutines for everyone
------------------------------------------------------
+=====================================================
 
 Code repository: https://gitlab.com/RcSepp/asyncframes
 
@@ -41,7 +42,7 @@ Frames can be removed in three ways:
 
 
 Installation
-------------
+============
 
 *asyncframes* can be installed via `pip`: ::
 
@@ -49,14 +50,14 @@ Installation
 
 *asyncframes* requires an event loop to suspend execution without blocking the
 operating system. The default event loop is ``asyncframes.asyncio_eventloop.EventLoop``.
-It doesn't depend on any Python packages, besides the builtin *asyncio* package.
+It doesn't depend on any Python packages besides the builtin *asyncio* package.
 Some frameworks, like Qt, use their own event loops. In this case the
 framework's event loop should be reused for *asyncframes* by implementing the
 ``asyncframes.AbstractEventLoop`` interface.
 
 
 Examples
---------
+========
 
 Here is a minimal example of using *asyncframes*: ::
 
