@@ -7,645 +7,645 @@ import sys
 
 
 class EventLoop(metaclass=abc.ABCMeta):
-	"""Abstract base class of event loops."""
+    """Abstract base class of event loops."""
 
-	_current = None
+    _current = None
 
-	@abc.abstractmethod
-	def _run(self):
-		raise NotImplementedError # pragma: no cover
-	@abc.abstractmethod
-	def _stop(self):
-		raise NotImplementedError # pragma: no cover
-	@abc.abstractmethod
-	def _post(self, event, delay):
-		raise NotImplementedError # pragma: no cover
+    @abc.abstractmethod
+    def _run(self):
+        raise NotImplementedError # pragma: no cover
+    @abc.abstractmethod
+    def _stop(self):
+        raise NotImplementedError # pragma: no cover
+    @abc.abstractmethod
+    def _post(self, event, delay):
+        raise NotImplementedError # pragma: no cover
 
-	def __init__(self):
-		self.passive_frame_exception_handler = None
+    def __init__(self):
+        self.passive_frame_exception_handler = None
 
-	def run(self, frame):
-		if EventLoop._current is not None:
-			raise Exception("Another event loop is already running")
-		EventLoop._current = self
+    def run(self, frame):
+        if EventLoop._current is not None:
+            raise Exception("Another event loop is already running")
+        EventLoop._current = self
 
-		try:
-			self.mainframe = frame()
-			if not self.mainframe.removed:
-				self._run()
-		finally:
-			EventLoop._current = None
-			Frame._current = None
+        try:
+            self.mainframe = frame()
+            if not self.mainframe.removed:
+                self._run()
+        finally:
+            EventLoop._current = None
+            Frame._current = None
 
-	def sendevent(self, event):
-		# Discard events sent after the event loop has been closed
-		if self != EventLoop._current: return
+    def sendevent(self, event):
+        # Discard events sent after the event loop has been closed
+        if self != EventLoop._current: return
 
-		try:
-			event.source.process(event.source, event)
-		except Exception as err:
-			if self.passive_frame_exception_handler:
-				self.passive_frame_exception_handler(err)
-			else:
-				raise
+        try:
+            event.source.process(event.source, event)
+        except Exception as err:
+            if self.passive_frame_exception_handler:
+                self.passive_frame_exception_handler(err)
+            else:
+                raise
 
-		if self.mainframe.removed: # If the main frame finished
-			self._stop()
-			return False
+        if self.mainframe.removed: # If the main frame finished
+            self._stop()
+            return False
 
-		return True
+        return True
 
-	def postevent(self, event, delay=0):
-		# Discard events sent after the event loop has been closed
-		if self != EventLoop._current: return
+    def postevent(self, event, delay=0):
+        # Discard events sent after the event loop has been closed
+        if self != EventLoop._current: return
 
-		self._post(event, delay)
+        self._post(event, delay)
 
 
 class Awaitable(collections.abc.Awaitable):
-	"""An awaitable frame or event source.
+    """An awaitable frame or event source.
 
-	Every node in the frame hierarchy is a subclass of `Awaitable`. An awaitable has a `__name__`,
-	a parent awaitable (None, if the awaitable is the main frame), a list of child awaitables and
-	a result, that gets set when the awaitable finishes.
+    Every node in the frame hierarchy is a subclass of `Awaitable`. An awaitable has a `__name__`,
+    a parent awaitable (None, if the awaitable is the main frame), a list of child awaitables and
+    a result, that gets set when the awaitable finishes.
 
-	Args:
-		name (str): The name of the awaitable
-	"""
+    Args:
+        name (str): The name of the awaitable
+    """
 
-	def __init__(self, name):
-		self.__name__ = name
-		self._parent = None
-		self._removed = False
-		self._result = None
-		self._listeners = set()
-	def remove(self):
-		"""Remove this awaitable from the frame hierarchy.
+    def __init__(self, name):
+        self.__name__ = name
+        self._parent = None
+        self._removed = False
+        self._result = None
+        self._listeners = set()
+    def remove(self):
+        """Remove this awaitable from the frame hierarchy.
 
-		Returns:
-			bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
-		"""
+        Returns:
+            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
+        """
 
-		if self._removed:
-			return False
-		self._removed = True
-		del self
-		return True
+        if self._removed:
+            return False
+        self._removed = True
+        del self
+        return True
 
-	@property
-	def removed(self):
-		"""Boolean property, indicating whether this awaitable has been removed from the frame hierarchy."""
-		return self._removed
+    @property
+    def removed(self):
+        """Boolean property, indicating whether this awaitable has been removed from the frame hierarchy."""
+        return self._removed
 
-	def __str__(self):
-		"""Human readable representation of this frame."""
-		return self.__name__
+    def __str__(self):
+        """Human readable representation of this frame."""
+        return self.__name__
 
-	def __repr__(self):
-		return "<{}.{} object at 0x{:x}>".format(self.__module__, self.__name__, id(self))
+    def __repr__(self):
+        return "<{}.{} object at 0x{:x}>".format(self.__module__, self.__name__, id(self))
 
-	def __await__(self):
-		if self.removed: # If this awaitable already finished
-			return self._result
-		listener = Frame._current
-		self._listeners.add(listener)
-		try:
-			while True:
-				msg = yield self
-				if isinstance(msg, BaseException):
-					raise msg
-		except (StopIteration, GeneratorExit):
-			return self._result
-		finally:
-			self._listeners.remove(listener)
+    def __await__(self):
+        if self.removed: # If this awaitable already finished
+            return self._result
+        listener = Frame._current
+        self._listeners.add(listener)
+        try:
+            while True:
+                msg = yield self
+                if isinstance(msg, BaseException):
+                    raise msg
+        except (StopIteration, GeneratorExit):
+            return self._result
+        finally:
+            self._listeners.remove(listener)
 
-	@abc.abstractmethod
-	def step(self, sender, msg):
-		raise NotImplementedError # pragma: no cover
+    @abc.abstractmethod
+    def step(self, sender, msg):
+        raise NotImplementedError # pragma: no cover
 
-	def process(self, sender, msg):
-		"""Propagate an event from its source and along awaiting nodes through the frame hierarchy.
+    def process(self, sender, msg):
+        """Propagate an event from its source and along awaiting nodes through the frame hierarchy.
 
-		Args:
-			sender (Awaitable): The source of the event or an awaited node that woke up
-			msg: The incomming event or propagated message
-		"""
+        Args:
+            sender (Awaitable): The source of the event or an awaited node that woke up
+            msg: The incomming event or propagated message
+        """
 
-		Frame._current = self # Activate self
-		try:
-			msg = self.step(sender, msg)
-		except (StopIteration, GeneratorExit) as err:
-			msg = err # Forward exception to listeners
-		except Exception as err:
-			if not self._listeners: raise
-			msg = err # Forward exception to listeners
-		if self._listeners:
-			for listener in self._listeners.copy():
-				listener.process(self, msg)
+        Frame._current = self # Activate self
+        try:
+            msg = self.step(sender, msg)
+        except (StopIteration, GeneratorExit) as err:
+            msg = err # Forward exception to listeners
+        except Exception as err:
+            if not self._listeners: raise
+            msg = err # Forward exception to listeners
+        if self._listeners:
+            for listener in self._listeners.copy():
+                listener.process(self, msg)
 
-	def __and__(self, other):
-		"""Register A & B as shortcut for all_(A, B)
+    def __and__(self, other):
+        """Register A & B as shortcut for all_(A, B)
 
-		Args:
-			other (Awaitable): The other awaitable
+        Args:
+            other (Awaitable): The other awaitable
 
-		Returns:
-			all_: A frame awaiting `self` and `other`
-		"""
+        Returns:
+            all_: A frame awaiting `self` and `other`
+        """
 
-		return all_(self, other)
-	def __or__(self, other):
-		"""Register A | B as shortcut for any_(A, B)
+        return all_(self, other)
+    def __or__(self, other):
+        """Register A | B as shortcut for any_(A, B)
 
-		Args:
-			other (Awaitable): The other awaitable
+        Args:
+            other (Awaitable): The other awaitable
 
-		Returns:
-			any_: A frame awaiting `self` and `other`
-		"""
+        Returns:
+            any_: A frame awaiting `self` and `other`
+        """
 
-		return any_(self, other)
+        return any_(self, other)
 
 class EventSource(Awaitable):
-	"""An awaitable emitter of events.
+    """An awaitable emitter of events.
 
-	Instantiate or overload this class to implement new events.
-	Each type of event should be emitted by exactly one event source.
-	For example, key-up and key-down events should be implemented by two separate event sources.
-	Event sources represent leave nodes in the frame hierarchy.
+    Instantiate or overload this class to implement new events.
+    Each type of event should be emitted by exactly one event source.
+    For example, key-up and key-down events should be implemented by two separate event sources.
+    Event sources represent leave nodes in the frame hierarchy.
 
-	Args:
-		name (str): The name of the event
-		autoremove (bool, optional): Defaults to False. If `True`, removes the source after it has been resumed by an event
-	"""
+    Args:
+        name (str): The name of the event
+        autoremove (bool, optional): Defaults to False. If `True`, removes the source after it has been resumed by an event
+    """
 
-	def __init__(self, name, autoremove=False):
-		super().__init__(name)
-		self.autoremove = autoremove
-	def remove(self):
-		"""Remove this awaitable from the frame hierarchy.
+    def __init__(self, name, autoremove=False):
+        super().__init__(name)
+        self.autoremove = autoremove
+    def remove(self):
+        """Remove this awaitable from the frame hierarchy.
 
-		If `autoremove` is False, this function is supressed
+        If `autoremove` is False, this function is supressed
 
-		Returns:
-			bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
-		"""
+        Returns:
+            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
+        """
 
-		return super().remove() if self.autoremove else False
-	def step(self, sender, msg):
-		"""Handle incoming events.
+        return super().remove() if self.autoremove else False
+    def step(self, sender, msg):
+        """Handle incoming events.
 
-		Args:
-			sender (EventSource): The source of the event. This value is always identical to `self`
-			msg (Event): The incomming event
+        Args:
+            sender (EventSource): The source of the event. This value is always identical to `self`
+            msg (Event): The incomming event
 
-		Raises:
-			StopIteration: If the incoming event should wake up awaiting frames, raise a StopIteration with `value` set to the event
-		"""
+        Raises:
+            StopIteration: If the incoming event should wake up awaiting frames, raise a StopIteration with `value` set to the event
+        """
 
-		self._result = msg
-		self.remove()
-		stop = StopIteration()
-		stop.value = msg
-		raise stop
-	def send(self, sender, args=None):
-		"""Dispatch and immediately process an event.
+        self._result = msg
+        self.remove()
+        stop = StopIteration()
+        stop.value = msg
+        raise stop
+    def send(self, sender, args=None):
+        """Dispatch and immediately process an event.
 
-		Args:
-			sender: The entity triggering the event, for example, the button instance on a button-press event
-			args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event
-		"""
+        Args:
+            sender: The entity triggering the event, for example, the button instance on a button-press event
+            args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event
+        """
 
-		EventLoop._current.sendevent(Event(sender, self, args))
-	def invoke(self, sender, args=None):
-		"""Enqueue an event in the event loop.
+        EventLoop._current.sendevent(Event(sender, self, args))
+    def invoke(self, sender, args=None):
+        """Enqueue an event in the event loop.
 
-		Args:
-			sender: The entity triggering the event, for example, the button instance on a button-press event
-			args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event
-		"""
+        Args:
+            sender: The entity triggering the event, for example, the button instance on a button-press event
+            args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event
+        """
 
-		EventLoop._current.postevent(Event(sender, self, args))
+        EventLoop._current.postevent(Event(sender, self, args))
 
 class Event():
-	"""Data structure, containing information about the occurance of an event.
+    """Data structure, containing information about the occurance of an event.
 
-	Args:
-		sender: The entity triggering the event, for example, the button instance on a button-press event
-		source (EventSource): The awaitable class that dispached this event
-		args: Event arguments, for example, the progress value on a progress-update event
-	"""
+    Args:
+        sender: The entity triggering the event, for example, the button instance on a button-press event
+        source (EventSource): The awaitable class that dispached this event
+        args: Event arguments, for example, the progress value on a progress-update event
+    """
 
-	def __init__(self, sender, source, args):
-		self.sender = sender
-		self.source = source
-		self.args = args
+    def __init__(self, sender, source, args):
+        self.sender = sender
+        self.source = source
+        self.args = args
 
-	def __str__(self):
-		return str(self.source)
+    def __str__(self):
+        return str(self.source)
 
 class all_(Awaitable):
-	"""An awaitable that blocks the awaiting frame until all passed awaitables woke up.
+    """An awaitable that blocks the awaiting frame until all passed awaitables woke up.
 
-	Args:
-		*awaitables (Awaitable[]): A list of all awaitables to await
-	"""
+    Args:
+        *awaitables (Awaitable[]): A list of all awaitables to await
+    """
 
-	def __init__(self, *awaitables):
-		super().__init__("all({})".format(", ".join(str(a) for a in awaitables)))
+    def __init__(self, *awaitables):
+        super().__init__("all({})".format(", ".join(str(a) for a in awaitables)))
 
-		self._result = {awaitable:awaitable._result for awaitable in awaitables if awaitable.removed}
-		if len(self._result) == len(awaitables):
-			super().remove()
-			return
+        self._result = {awaitable:awaitable._result for awaitable in awaitables if awaitable.removed}
+        if len(self._result) == len(awaitables):
+            super().remove()
+            return
 
-		self._parent = Frame._current
-		if self._parent:
-			self._parent._children.append(self)
+        self._parent = Frame._current
+        if self._parent:
+            self._parent._children.append(self)
 
-		# Adopt awaitables
-		self._children = [awaitable for awaitable in awaitables if not awaitable.removed]
-		for child in self._children: # Note: This loop also erases identical children
-			if child._parent:
-				child._parent._children.remove(child)
-			child._parent = self
+        # Adopt awaitables
+        self._children = [awaitable for awaitable in awaitables if not awaitable.removed]
+        for child in self._children: # Note: This loop also erases identical children
+            if child._parent:
+                child._parent._children.remove(child)
+            child._parent = self
 
-		self._num_children = len(self._children)
+        self._num_children = len(self._children)
 
-	def __await__(self):
-		if self.removed: # If this awaitable already finished
-			return self._result
-		listener = Frame._current
-		self._listeners.add(listener)
-		for child in self._children:
-			child._listeners.add(self)
-		try:
-			while True:
-				msg = yield self
-				if isinstance(msg, BaseException):
-					raise msg
-		except (StopIteration, GeneratorExit):
-			return self._result
-		finally:
-			self._listeners.remove(listener)
-			for child in self._children:
-				child._listeners.remove(self)
+    def __await__(self):
+        if self.removed: # If this awaitable already finished
+            return self._result
+        listener = Frame._current
+        self._listeners.add(listener)
+        for child in self._children:
+            child._listeners.add(self)
+        try:
+            while True:
+                msg = yield self
+                if isinstance(msg, BaseException):
+                    raise msg
+        except (StopIteration, GeneratorExit):
+            return self._result
+        finally:
+            self._listeners.remove(listener)
+            for child in self._children:
+                child._listeners.remove(self)
 
-	def step(self, sender, msg):
-		"""Respond to an awaking child.
+    def step(self, sender, msg):
+        """Respond to an awaking child.
 
-		Args:
-			sender (Awaitable): The awaking child
-			msg (BaseException): A StopIteration exception with the awaking child's result or an exception raised in a child frame
+        Args:
+            sender (Awaitable): The awaking child
+            msg (BaseException): A StopIteration exception with the awaking child's result or an exception raised in a child frame
 
-		Raises:
-			StopIteration: Once all children woke up, this raises a StopIteration with `value` set to a dict of all children's results
-			BaseException: If msg is an Exception other than GeneratorExit or StopIteration, the exception is re-raised
-		"""
+        Raises:
+            StopIteration: Once all children woke up, this raises a StopIteration with `value` set to a dict of all children's results
+            BaseException: If msg is an Exception other than GeneratorExit or StopIteration, the exception is re-raised
+        """
 
-		if isinstance(msg, BaseException):
-			if type(msg) == StopIteration:
-				self._result[sender] = msg.value
-			elif type(msg) != GeneratorExit:
-				raise msg
+        if isinstance(msg, BaseException):
+            if type(msg) == StopIteration:
+                self._result[sender] = msg.value
+            elif type(msg) != GeneratorExit:
+                raise msg
 
-		if len(self._result) == self._num_children: # If _num_children results have been received
-			self.remove()
-			stop = StopIteration()
-			stop.value = self._result
-			raise stop
+        if len(self._result) == self._num_children: # If _num_children results have been received
+            self.remove()
+            stop = StopIteration()
+            stop.value = self._result
+            raise stop
 
-	def remove(self):
-		"""Remove this awaitable from the frame hierarchy.
+    def remove(self):
+        """Remove this awaitable from the frame hierarchy.
 
-		Returns:
-			bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
-		"""
+        Returns:
+            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
+        """
 
-		if not super().remove():
-			return False
-		for child in self._children:
-			child.remove()
-		if self._parent:
-			self._parent._children.remove(self)
-		return True
+        if not super().remove():
+            return False
+        for child in self._children:
+            child.remove()
+        if self._parent:
+            self._parent._children.remove(self)
+        return True
 
 class any_(Awaitable):
-	"""An awaitable that blocks the awaiting frame until any of the passed awaitables wakes up.
+    """An awaitable that blocks the awaiting frame until any of the passed awaitables wakes up.
 
-	Args:
-		*awaitables (Awaitable[]): A list of all awaitables to await
-	"""
+    Args:
+        *awaitables (Awaitable[]): A list of all awaitables to await
+    """
 
-	def __init__(self, *awaitables):
-		super().__init__("any({})".format(", ".join(str(a) for a in awaitables)))
+    def __init__(self, *awaitables):
+        super().__init__("any({})".format(", ".join(str(a) for a in awaitables)))
 
-		for awaitable in awaitables:
-			if awaitable.removed:
-				self._result = awaitable._result
-				super().remove()
-				return
+        for awaitable in awaitables:
+            if awaitable.removed:
+                self._result = awaitable._result
+                super().remove()
+                return
 
-		self._parent = Frame._current
-		if self._parent:
-			self._parent._children.append(self)
+        self._parent = Frame._current
+        if self._parent:
+            self._parent._children.append(self)
 
-		# Adopt awaitables
-		self._children = list(awaitables)
-		for child in self._children: # Note: This loop also erases identical children
-			if child._parent:
-				child._parent._children.remove(child)
-			child._parent = self
+        # Adopt awaitables
+        self._children = list(awaitables)
+        for child in self._children: # Note: This loop also erases identical children
+            if child._parent:
+                child._parent._children.remove(child)
+            child._parent = self
 
-	def __await__(self):
-		if self.removed: # If this awaitable already finished
-			return self._result
-		listener = Frame._current
-		self._listeners.add(listener)
-		for child in self._children:
-			child._listeners.add(self)
-		try:
-			while True:
-				msg = yield self
-				if isinstance(msg, BaseException):
-					raise msg
-		except (StopIteration, GeneratorExit):
-			return self._result
-		finally:
-			self._listeners.remove(listener)
-			for child in self._children:
-				child._listeners.remove(self)
+    def __await__(self):
+        if self.removed: # If this awaitable already finished
+            return self._result
+        listener = Frame._current
+        self._listeners.add(listener)
+        for child in self._children:
+            child._listeners.add(self)
+        try:
+            while True:
+                msg = yield self
+                if isinstance(msg, BaseException):
+                    raise msg
+        except (StopIteration, GeneratorExit):
+            return self._result
+        finally:
+            self._listeners.remove(listener)
+            for child in self._children:
+                child._listeners.remove(self)
 
-	def step(self, sender, msg):
-		"""Respond to an awaking child.
+    def step(self, sender, msg):
+        """Respond to an awaking child.
 
-		Args:
-			sender (Awaitable): The awaking child
-			msg (BaseException): A StopIteration exception with the awaking child's result or an exception raised in a child frame
+        Args:
+            sender (Awaitable): The awaking child
+            msg (BaseException): A StopIteration exception with the awaking child's result or an exception raised in a child frame
 
-		Raises:
-			StopIteration: If msg indicates an awaking child, store its result as this frame's result
-			BaseException: Forward any exceptions
-		"""
+        Raises:
+            StopIteration: If msg indicates an awaking child, store its result as this frame's result
+            BaseException: Forward any exceptions
+        """
 
-		if isinstance(msg, BaseException):
-			if type(msg) == StopIteration:
-				self._result = msg.value
-			self.remove()
-			raise msg
+        if isinstance(msg, BaseException):
+            if type(msg) == StopIteration:
+                self._result = msg.value
+            self.remove()
+            raise msg
 
-	def remove(self):
-		"""Remove this awaitable from the frame hierarchy.
+    def remove(self):
+        """Remove this awaitable from the frame hierarchy.
 
-		Returns:
-			bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
-		"""
+        Returns:
+            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
+        """
 
-		if not super().remove():
-			return False
-		for child in self._children:
-			child.remove()
-		if self._parent:
-			self._parent._children.remove(self)
-		return True
+        if not super().remove():
+            return False
+        for child in self._children:
+            child.remove()
+        if self._parent:
+            self._parent._children.remove(self)
+        return True
 
 
 class sleep(EventSource):
-	"""An awaitable used for suspending execution by the specified amount of time.
+    """An awaitable used for suspending execution by the specified amount of time.
 
-	A duration of 0 seconds will resume the awaiting frame as soon as possible.
-	This is useful to implement non-blocking loops.
+    A duration of 0 seconds will resume the awaiting frame as soon as possible.
+    This is useful to implement non-blocking loops.
 
-	Args:
-		seconds (float, optional): Defaults to 0. The duration to wait
+    Args:
+        seconds (float, optional): Defaults to 0. The duration to wait
 
-	Raises:
-		ValueError: Raised when sleep is constructed with a negative duration
-	"""
+    Raises:
+        ValueError: Raised when sleep is constructed with a negative duration
+    """
 
-	def __init__(self, seconds=0.0):
-		if seconds < 0:
-			raise ValueError()
-		super().__init__("sleep({})".format(seconds), autoremove=True)
+    def __init__(self, seconds=0.0):
+        if seconds < 0:
+            raise ValueError()
+        super().__init__("sleep({})".format(seconds), autoremove=True)
 
-		# Raise event
-		EventLoop._current.postevent(Event(self, self, None), delay=seconds)
+        # Raise event
+        EventLoop._current.postevent(Event(self, self, None), delay=seconds)
 
 class hold(EventSource):
-	"""An awaitable used for suspending execution indefinitely.
+    """An awaitable used for suspending execution indefinitely.
 
-	Frames are automatically removed when the frame coroutine finishes.
-	If you would like the frame to remain open until it is removed, write `await hold()` at the end of the coroutine.
-	"""
+    Frames are automatically removed when the frame coroutine finishes.
+    If you would like the frame to remain open until it is removed, write `await hold()` at the end of the coroutine.
+    """
 
-	def __init__(self):
-		super().__init__("hold()", autoremove=True)
-	def step(self, sender, msg):
-		""" Ignore any incoming events."""
+    def __init__(self):
+        super().__init__("hold()", autoremove=True)
+    def step(self, sender, msg):
+        """ Ignore any incoming events."""
 
-		pass
+        pass
 
 class animate(EventSource):
-	"""An awaitable used for periodically calling a callback function for the specified amount of time.
+    """An awaitable used for periodically calling a callback function for the specified amount of time.
 
-	Args:
-		seconds (float): The duration of the animation
-		callback (Callable[float, None]): The function to be called on every iteration. The first parameter of `callback` indicates animation progress between 0 and 1
-	"""
+    Args:
+        seconds (float): The duration of the animation
+        callback (Callable[float, None]): The function to be called on every iteration. The first parameter of `callback` indicates animation progress between 0 and 1
+    """
 
-	def __init__(self, seconds, callback):
-		super().__init__("animate()", autoremove=True)
-		self.seconds = seconds
-		self.callback = callback
-		self.startTime = datetime.datetime.now()
+    def __init__(self, seconds, callback):
+        super().__init__("animate()", autoremove=True)
+        self.seconds = seconds
+        self.callback = callback
+        self.startTime = datetime.datetime.now()
 
-		# Raise event
-		EventLoop._current.postevent(Event(self, self, None))
+        # Raise event
+        EventLoop._current.postevent(Event(self, self, None))
 
-	def step(self, sender, msg):
-		"""Re-invoke the animation event until the timeout is reached."""
-		t = (datetime.datetime.now() - self.startTime).total_seconds()
+    def step(self, sender, msg):
+        """Re-invoke the animation event until the timeout is reached."""
+        t = (datetime.datetime.now() - self.startTime).total_seconds()
 
-		if t >= self.seconds:
-			self.callback(1.0)
-			self._result = msg
-			self.remove()
-			stop = StopIteration()
-			stop.value = msg
-			raise stop
-		else:
-			self.callback(t / self.seconds)
+        if t >= self.seconds:
+            self.callback(1.0)
+            self._result = msg
+            self.remove()
+            stop = StopIteration()
+            stop.value = msg
+            raise stop
+        else:
+            self.callback(t / self.seconds)
 
-			# Reraise event
-			EventLoop._current.postevent(Event(self, self, None))
+            # Reraise event
+            EventLoop._current.postevent(Event(self, self, None))
 
 
 class Frame(Awaitable):
-	"""An object within the frame hierarchy.
+    """An object within the frame hierarchy.
 
-	This class can be used in 2 ways:
-	1) Annotate a coroutine with `@Frame` to use it in the frame hierarchy.
-	2) Create a frame class by subclassing `Frame` and instantiate the frame class by annotating a coroutine with `@MyFrameClass`.
-	"""
+    This class can be used in 2 ways:
+    1) Annotate a coroutine with `@Frame` to use it in the frame hierarchy.
+    2) Create a frame class by subclassing `Frame` and instantiate the frame class by annotating a coroutine with `@MyFrameClass`.
+    """
 
-	_current = None
+    _current = None
 
-	def __new__(cls, *frameclassargs, **frameclasskwargs):
-		def ___new__(framefunc):
-			def create_frame(*frameargs, **framekwargs):
-				frame = super(Frame, cls).__new__(cls)
-				frame.__init__(*frameclassargs, **frameclasskwargs)
-				frame.create(framefunc, *frameargs, **framekwargs)
-				return frame
-			return create_frame
+    def __new__(cls, *frameclassargs, **frameclasskwargs):
+        def ___new__(framefunc):
+            def create_frame(*frameargs, **framekwargs):
+                frame = super(Frame, cls).__new__(cls)
+                frame.__init__(*frameclassargs, **frameclasskwargs)
+                frame.create(framefunc, *frameargs, **framekwargs)
+                return frame
+            return create_frame
 
-		if len(frameclassargs) == 1 and not frameclasskwargs and callable(frameclassargs[0]): # If @frame was called without parameters
-			framefunc = frameclassargs[0]
-			frameclassargs = ()
-			return ___new__(framefunc)
-		else: # If @frame was called with parameters
-			return ___new__
+        if len(frameclassargs) == 1 and not frameclasskwargs and callable(frameclassargs[0]): # If @frame was called without parameters
+            framefunc = frameclassargs[0]
+            frameclassargs = ()
+            return ___new__(framefunc)
+        else: # If @frame was called with parameters
+            return ___new__
 
-	def __init__(self):
-		super().__init__(self.__class__.__name__)
-		self._parent = Frame._current
-		if self._parent:
-			self._parent._children.append(self)
-		self._children = []
-		self._activechild = None
-		self._primitives = []
-		self._generator = None
+    def __init__(self):
+        super().__init__(self.__class__.__name__)
+        self._parent = Frame._current
+        if self._parent:
+            self._parent._children.append(self)
+        self._children = []
+        self._activechild = None
+        self._primitives = []
+        self._generator = None
 
-	def create(self, framefunc, *frameargs, **framekwargs):
-		"""Start the frame function with the given arguments.
+    def create(self, framefunc, *frameargs, **framekwargs):
+        """Start the frame function with the given arguments.
 
-		Args:
-			framefunc (function): A coroutine or regular function controlling the behaviour of this frame.
-								  If `framefunc` is a coroutine, then the frame only exists until the coroutine exits.
-		"""
+        Args:
+            framefunc (function): A coroutine or regular function controlling the behaviour of this frame.
+                                If `framefunc` is a coroutine, then the frame only exists until the coroutine exits.
+        """
 
-		if framefunc and not self.removed and self._generator is None:
-			self.__name__ = framefunc.__name__
+        if framefunc and not self.removed and self._generator is None:
+            self.__name__ = framefunc.__name__
 
-			# Activate self
-			Frame._current = self
+            # Activate self
+            Frame._current = self
 
-			hasself = 'self' in inspect.signature(framefunc).parameters
-			self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
+            hasself = 'self' in inspect.signature(framefunc).parameters
+            self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
 
-			if inspect.isawaitable(self._generator): # If framefunc is a coroutine
-				# Start coroutine
-				try:
-					self.step(None, None)
-				except (StopIteration, GeneratorExit):
-					pass
-				finally:
-					# Activate parent
-					Frame._current = self._parent
-			else:
-				# Activate parent
-				Frame._current = self._parent
+            if inspect.isawaitable(self._generator): # If framefunc is a coroutine
+                # Start coroutine
+                try:
+                    self.step(None, None)
+                except (StopIteration, GeneratorExit):
+                    pass
+                finally:
+                    # Activate parent
+                    Frame._current = self._parent
+            else:
+                # Activate parent
+                Frame._current = self._parent
 
-	def step(self, sender, msg):
-		"""Resume the frame coroutine.
+    def step(self, sender, msg):
+        """Resume the frame coroutine.
 
-		Args:
-			sender (Awaitable): The resumed awaitable
-			msg (BaseException): A message to be forwarded to the coroutine
+        Args:
+            sender (Awaitable): The resumed awaitable
+            msg (BaseException): A message to be forwarded to the coroutine
 
-		Raises:
-			StopIteration: Raised if the coroutine finished with a result
-			GeneratorExit: Raised if the coroutine finished without a result
-			Exception: Raised if the coroutine encountered an error
-		"""
+        Raises:
+            StopIteration: Raised if the coroutine finished with a result
+            GeneratorExit: Raised if the coroutine finished without a result
+            Exception: Raised if the coroutine encountered an error
+        """
 
-		if self.removed:
-			raise GeneratorExit
+        if self.removed:
+            raise GeneratorExit
 
-		if self._generator is not None:
-			# Advance generator
-			try:
-				self._generator.send(msg)
-			except StopIteration as stop: # If done
-				self._result = stop.value
-				self.remove()
-				raise
-			except (GeneratorExit, Exception): # If done
-				self.remove()
-				raise
+        if self._generator is not None:
+            # Advance generator
+            try:
+                self._generator.send(msg)
+            except StopIteration as stop: # If done
+                self._result = stop.value
+                self.remove()
+                raise
+            except (GeneratorExit, Exception): # If done
+                self.remove()
+                raise
 
-	def remove(self):
-		"""Remove this awaitable from the frame hierarchy.
+    def remove(self):
+        """Remove this awaitable from the frame hierarchy.
 
-		Returns:
-			bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
-		"""
+        Returns:
+            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
+        """
 
-		if not super().remove():
-			return False
+        if not super().remove():
+            return False
 
-		# Remove child frames
-		while self._children:
-			self._children[-1].remove()
+        # Remove child frames
+        while self._children:
+            self._children[-1].remove()
 
-		# Remove self from parent frame
-		if self._parent:
-			self._parent._children.remove(self)
+        # Remove self from parent frame
+        if self._parent:
+            self._parent._children.remove(self)
 
-		# Remove primitives
-		while self._primitives:
-			self._primitives[-1].remove()
+        # Remove primitives
+        while self._primitives:
+            self._primitives[-1].remove()
 
-		# Post frame removed event
-		EventLoop._current.postevent(Event(self, self, None))
+        # Post frame removed event
+        EventLoop._current.postevent(Event(self, self, None))
 
-		# Stop framefunc
-		if self._generator: # If framefunc is a coroutine
-			if self._generator.cr_running:
-				# Calling coroutine.close() from within the coroutine is illegal, so we throw a GeneratorExit manually instead
-				self._generator = None
-				raise GeneratorExit()
-			else:
-				self._generator.close()
-				self._generator = None
+        # Stop framefunc
+        if self._generator: # If framefunc is a coroutine
+            if self._generator.cr_running:
+                # Calling coroutine.close() from within the coroutine is illegal, so we throw a GeneratorExit manually instead
+                self._generator = None
+                raise GeneratorExit()
+            else:
+                self._generator.close()
+                self._generator = None
 
-		return True
+        return True
 
 
 class Primitive(object):
-	"""An object owned by a frame of the specified frame class.
+    """An object owned by a frame of the specified frame class.
 
-	A primitive has to be created within the frame function of its owner or within the frame function of any child frame of its owning frame class.
-	If it is created within a child frame, it will still be registered with the closest parent of the owning frame class.
+    A primitive has to be created within the frame function of its owner or within the frame function of any child frame of its owning frame class.
+    If it is created within a child frame, it will still be registered with the closest parent of the owning frame class.
 
-	Args:
-		owner (class): The owning frame class
+    Args:
+        owner (class): The owning frame class
 
-	Raises:
-		TypeError: Raised if owner is not a frame class
-		Exception: Raised if a primitive is created outside the frame function of its owning frame class
-	"""
+    Raises:
+        TypeError: Raised if owner is not a frame class
+        Exception: Raised if a primitive is created outside the frame function of its owning frame class
+    """
 
-	def __init__(self, owner):
-		# Validate parameters
-		if not issubclass(owner, Frame):
-			raise TypeError("'owner' must be of type Frame")
+    def __init__(self, owner):
+        # Validate parameters
+        if not issubclass(owner, Frame):
+            raise TypeError("'owner' must be of type Frame")
 
-		# Find parent frame of class 'owner'
-		self._owner = Frame._current
-		while self._owner and not issubclass(type(self._owner), owner):
-			self._owner = self._owner._parent
-		if not self._owner:
-			raise Exception(self.__class__.__name__ + " can't be defined outside " + owner.__name__)
+        # Find parent frame of class 'owner'
+        self._owner = Frame._current
+        while self._owner and not issubclass(type(self._owner), owner):
+            self._owner = self._owner._parent
+        if not self._owner:
+            raise Exception(self.__class__.__name__ + " can't be defined outside " + owner.__name__)
 
-		# Register with parent frame
-		self._owner._primitives.append(self)
+        # Register with parent frame
+        self._owner._primitives.append(self)
 
-	def remove(self):
-		"""Remove this awaitable from the frame hierarchy.
+    def remove(self):
+        """Remove this awaitable from the frame hierarchy.
 
-		Returns:
-			bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
-		"""
+        Returns:
+            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
+        """
 
-		self._owner._primitives.remove(self)
+        self._owner._primitives.remove(self)
