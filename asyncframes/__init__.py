@@ -114,6 +114,10 @@ class Awaitable(collections.abc.Awaitable):
 
     def __repr__(self):
         return "<{}.{} object at 0x{:x}>".format(self.__module__, self.__name__, id(self))
+    
+    def __lt__(self, other):
+        """Make awaitables sortable by name."""
+        return self.__name__ < other.__name__
 
     def __await__(self):
         if self.removed: # If this awaitable already finished
