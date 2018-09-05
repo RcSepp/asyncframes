@@ -8,6 +8,8 @@ htmlcov/
 
 # Setup metadata
 *.egg-info/*
+build/
+dist/
 
 # Sphinx documentation
 docs/_build/
