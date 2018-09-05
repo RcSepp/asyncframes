@@ -14,7 +14,7 @@ __all__ = [
     'all_', 'animate', 'any_', 'Awaitable', 'Event', 'AbstractEventLoop',
     'EventSource', 'Frame', 'hold', 'Primitive', 'sleep'
 ]
-__version__ = '1.0.0'
+__version__ = '1.0.1'
 
 
 class AbstractEventLoop(metaclass=abc.ABCMeta):
