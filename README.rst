@@ -5,7 +5,8 @@ asyncframes - Object oriented coroutines for everyone
 .. image:: https://travis-ci.org/RcSepp/asyncframes.svg?branch=master
     :target: https://travis-ci.org/RcSepp/asyncframes
 
-Code repository: https://gitlab.com/RcSepp/asyncframes
+Code repository: https://github.com/RcSepp/asyncframes
+Python Package Index: https://pypi.org/project/asyncframes/
 
 ----
 
