@@ -30,5 +30,6 @@ setuptools.setup(
         'Operating System :: OS Independent',
         'Programming Language :: Python :: 3',
         'Topic :: Software Development :: Libraries :: Application Frameworks'
-    ]
+    ],
+    python_requires='>=3.5'
 )
