@@ -427,11 +427,16 @@ class TestAsyncFrames(unittest.TestCase):
     def test_animate(self):
         @Frame
         async def a():
-            await animate(0.1, lambda f: None)
+            await animate(0.25, lambda f: log.debug(''), 0.1)
         @Frame
         async def main():
             await a()
         self.loop.run(main)
+        self.assertLogEqual("""
+            0.1
+            0.2
+            0.2
+        """)
 
     def test_unfinished_await(self):
         @MyFrame

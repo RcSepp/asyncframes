@@ -466,16 +466,18 @@ class animate(EventSource):
     Args:
         seconds (float): The duration of the animation
         callback (Callable[float, None]): The function to be called on every iteration. The first parameter of `callback` indicates animation progress between 0 and 1
+        interval (float, optional): Defaults to 0.0. The minimum time in seconds between two consecutive calls of the callback
     """
 
-    def __init__(self, seconds, callback):
+    def __init__(self, seconds, callback, interval=0.0):
         super().__init__("animate()", autoremove=True)
         self.seconds = seconds
         self.callback = callback
+        self.interval = interval
         self.startTime = datetime.datetime.now()
 
         # Raise event
-        AbstractEventLoop._current.postevent(Event(self, self, None))
+        AbstractEventLoop._current.postevent(Event(self, self, None), delay=interval)
 
     def step(self, sender, msg):
         """Re-invoke the animation event until the timeout is reached."""
@@ -492,7 +494,7 @@ class animate(EventSource):
             self.callback(t / self.seconds)
 
             # Reraise event
-            AbstractEventLoop._current.postevent(Event(self, self, None))
+            AbstractEventLoop._current.postevent(Event(self, self, None), delay=min(self.interval, self.seconds - t))
 
 
 class Frame(Awaitable):
