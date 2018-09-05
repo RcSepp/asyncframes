@@ -5,6 +5,7 @@
 import datetime
 import io
 import logging
+import math
 import unittest
 from asyncframes import sleep, hold, animate, EventSource, Frame, Primitive
 
@@ -28,11 +29,10 @@ async def wait(seconds, name):
     return "some result"
 
 EVENTLOOP_CLASS = None
+SKIP_TEST_CASE = None
 
 class TestAsyncFrames(unittest.TestCase):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
+    def setUp(self):
         # Create default event loop if no event loop was created by a base class
         if not hasattr(self, 'loop'):
             from asyncframes.asyncio_eventloop import EventLoop
@@ -41,13 +41,13 @@ class TestAsyncFrames(unittest.TestCase):
         # Announce event loop if different
         global EVENTLOOP_CLASS
         if self.loop.__class__ != EVENTLOOP_CLASS:
+            print()
             print("Using {}.{}".format(self.loop.__class__.__module__, self.loop.__class__.__name__))
             EVENTLOOP_CLASS = self.loop.__class__
 
         # Register event handler for exceptions raised within passive frames
         self.loop.passive_frame_exception_handler = lambda err: log.debug("Passive frame exception caught: " + repr(err))
 
-    def setUp(self):
         # Create logger for debugging program flow using time stamped log messages
         # Create time stamped log messages using log.debug(...)
         # Test program flow using self.assertLogEqual(...)
@@ -64,7 +64,7 @@ class TestAsyncFrames(unittest.TestCase):
             def format(self, record):
                 t = (datetime.datetime.now() - self.starttime).total_seconds()
                 msg = super().format(record)
-                return str(round(t, 1)) + ": " + msg if msg else str(round(t, 1))
+                return str(math.floor(t * 10) / 10) + ": " + msg if msg else str(math.floor(t * 10) / 10)
         loghandler.setFormatter(TimedFormatter("%(message)s"))
         log.addHandler(loghandler)
 
@@ -333,7 +333,9 @@ class TestAsyncFrames(unittest.TestCase):
             log.debug((await s).source)
             log.debug(await w)
             log.debug((await (s | w)).source)
-            for k, v in (await (s & w)).items():
+            s_and_w = await (s & w)
+            for k in sorted(s_and_w):
+                v = s_and_w[k]
                 log.debug("{}: {}".format(k, v))
             log.debug('done')
         self.loop.run(main)
@@ -444,12 +446,22 @@ class TestAsyncFrames(unittest.TestCase):
         self.loop.run(frame)
 
 class TestPyQt5EventLoop(TestAsyncFrames):
-    def __init__(self, *args, **kwargs):
+    def setUp(self):
         # Create PyQt5 event loop
-        from asyncframes.pyqt5_eventloop import EventLoop
-        self.loop = EventLoop()
+        try:
+            from asyncframes.pyqt5_eventloop import EventLoop
+        except ImportError:
+            # Announce that we skip this test case, if not announced before
+            global SKIP_TEST_CASE
+            if self.__class__ != SKIP_TEST_CASE:
+                print()
+                print("Unable to import asyncframes.pyqt5_eventloop. Skipping unit tests for this event loop.")
+                SKIP_TEST_CASE = self.__class__
 
-        super().__init__(*args, **kwargs)
+            raise unittest.SkipTest
+        else:
+            self.loop = EventLoop()
+            super().setUp()
 
 if __name__ == "__main__":
     unittest.main()
