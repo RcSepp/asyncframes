@@ -18,8 +18,17 @@ setuptools.setup(
     version=asyncframes.__version__,
     description='Object oriented coroutines for everyone',
     long_description=read('README.rst') + '\n\n' + read('CHANGES.rst'),
-    author='RcSepp',
+    author='Sebastian Klaassen',
     author_email='rcsepp@hotmail.com',
-    license='MIT'
-    #url='TODO'
+    license='MIT',
+    url='https://github.com/RcSepp/asyncframes',
+    classifiers=[
+        'Development Status :: 5 - Production/Stable',
+        'Intended Audience :: Developers',
+        'License :: OSI Approved :: MIT License',
+        'Natural Language :: English',
+        'Operating System :: OS Independent',
+        'Programming Language :: Python :: 3',
+        'Topic :: Software Development :: Libraries :: Application Frameworks'
+    ]
 )
