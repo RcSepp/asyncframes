@@ -13,13 +13,6 @@ class EventLoop(asyncframes.AbstractEventLoop):
         super().__init__()
         self.qt = QApplication.instance() or QApplication([])
 
-        try:
-            import qdarkstyle
-        except ImportError:
-            pass
-        else:
-            self.qt.setStyleSheet(qdarkstyle.load_stylesheet_pyqt5())
-
     def _run(self):
         try:
             self.qt.exec_()
