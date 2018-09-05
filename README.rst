@@ -22,6 +22,9 @@ The main features of *asyncframes* are:
   execution of a coroutine)
 
 
+Introduction
+============
+
 Frame Hierarchy Programming Model
 ---------------------------------
 
@@ -38,10 +41,10 @@ multitasking) unless it's awaiting another frame or an awaitable event.
 
 Frames can be removed in three ways:
 
-1. The frames ``remove()`` function is called (either by the frame itself or by
+1. The frame's ``remove()`` function is called (either by the frame itself or by
    another frame).
-2. The frames coroutine finishes (i.e. goes out of scope).
-3. A parent frame is being removed.
+2. The frame's coroutine finishes (i.e. goes out of scope).
+3. A parent frame is removed.
 
 
 Installation
@@ -54,9 +57,9 @@ Installation
 *asyncframes* requires an event loop to suspend execution without blocking the
 operating system. The default event loop is ``asyncframes.asyncio_eventloop.EventLoop``.
 It doesn't depend on any Python packages besides the builtin *asyncio* package.
-Some frameworks, like Qt, use their own event loops. In this case the
-framework's event loop should be reused for *asyncframes* by implementing the
-``asyncframes.AbstractEventLoop`` interface.
+Some frameworks, like Qt, use their own event loops. When using such frameworks,
+the framework's event loop should be reused for *asyncframes* by implementing
+the ``asyncframes.AbstractEventLoop`` interface.
 
 
 Examples
