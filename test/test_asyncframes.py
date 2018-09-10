@@ -522,6 +522,27 @@ class TestAsyncFrames(unittest.TestCase):
         with self.assertRaisesRegex(InvalidOperationException, "Can't call frame without a running event loop"):
             wait(0.0, '')
 
+    def test_free(self):
+        @Frame
+        async def frame():
+            sf = subframe()
+            await sleep(0.1)
+            sf.remove()
+
+            subframe()
+        @Frame
+        async def subframe(self):
+            log.debug('1')
+            await self.free
+            log.debug('2')
+        self.loop.run(frame)
+        self.assertLogEqual("""
+            0.0: 1
+            0.1: 2
+            0.1: 1
+            0.1: 2
+        """)
+
 class TestPyQt5EventLoop(TestAsyncFrames):
     def setUp(self):
         # Create PyQt5 event loop

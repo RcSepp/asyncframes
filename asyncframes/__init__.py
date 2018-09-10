@@ -558,6 +558,7 @@ class Frame(Awaitable):
         self._activechild = None
         self._primitives = []
         self._generator = None
+        self.free = EventSource(str(self.__name__) + ".free")
 
     def create(self, framefunc, *frameargs, **framekwargs):
         """Start the frame function with the given arguments.
@@ -569,6 +570,7 @@ class Frame(Awaitable):
 
         if framefunc and not self.removed and self._generator is None:
             self.__name__ = framefunc.__name__
+            self.free.__name__ = str(self.__name__) + ".free"
 
             # Activate self
             Frame._current = self
@@ -624,12 +626,22 @@ class Frame(Awaitable):
             bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
         """
 
-        if not super().remove():
+        if self.removed:
+            return False
+
+        # Send frame free event
+        AbstractEventLoop._current.sendevent(Event(self, self.free, None))
+
+        if self.removed: # If this frame was closed in response to the free event, ...
             return False
 
         # Remove child frames
+        genexit = None
         while self._children:
-            self._children[-1].remove()
+            try:
+                self._children[-1].remove()
+            except GeneratorExit as err:
+                genexit = err # Delay raising GeneratorExit
 
         # Remove self from parent frame
         if self._parent:
@@ -639,18 +651,25 @@ class Frame(Awaitable):
         while self._primitives:
             self._primitives[-1].remove()
 
-        # Post frame removed event
-        AbstractEventLoop._current.postevent(Event(self, self, None))
-
         # Stop framefunc
         if self._generator: # If framefunc is a coroutine
             if self._generator.cr_running:
                 # Calling coroutine.close() from within the coroutine is illegal, so we throw a GeneratorExit manually instead
                 self._generator = None
-                raise GeneratorExit()
+                genexit = GeneratorExit
             else:
                 self._generator.close()
                 self._generator = None
+
+        # Post frame removed event
+        AbstractEventLoop._current.postevent(Event(self, self, None))
+
+        # Remove awaitable
+        super().remove()
+
+        # Raise delayed GeneratorExit exception
+        if genexit:
+            raise genexit
 
         return True
 
