@@ -16,8 +16,8 @@ class EventLoop(asyncframes.AbstractEventLoop):
     def _run(self):
         try:
             self.qt.exec_()
-        except:
-            print(traceback.format_exc())
+        except: # pragma: no cover
+            print(traceback.format_exc()) # pragma: no cover
 
     def _stop(self):
         QApplication.instance().exit()
