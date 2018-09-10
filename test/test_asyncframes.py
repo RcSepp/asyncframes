@@ -7,20 +7,13 @@ import io
 import logging
 import math
 import unittest
-from asyncframes import sleep, hold, animate, EventSource, Frame, Primitive
+from asyncframes import sleep, hold, animate, InvalidOperationException, EventSource, Frame, Primitive
 
 class MyFrame(Frame):
     @staticmethod
     def mystaticmethod():
         log.debug('static method called')
     classvar = 'class variable'
-
-class MyFrame2(Frame):
-    pass
-
-class MyPrimitive(Primitive):
-    def __init__(self):
-        super().__init__(MyFrame)
 
 @MyFrame
 async def wait(seconds, name):
@@ -213,6 +206,15 @@ class TestAsyncFrames(unittest.TestCase):
         """)
 
     def test_primitive(self):
+        class MyPrimitive(Primitive):
+            def __init__(self):
+                super().__init__(MyFrame)
+        class MyPrimitive2(Primitive):
+            def __init__(self):
+                super().__init__(MyPrimitive)
+        class MyFrame2(Frame):
+            pass
+
         @MyFrame
         async def f1():
             MyPrimitive()
@@ -221,7 +223,7 @@ class TestAsyncFrames(unittest.TestCase):
         @MyFrame2
         async def f2():
             MyPrimitive()
-        with self.assertRaises(Exception):
+        with self.assertRaises(InvalidOperationException):
             self.loop.run(f2)
 
         @MyFrame
@@ -229,8 +231,29 @@ class TestAsyncFrames(unittest.TestCase):
             f2()
         self.loop.run(f3)
 
-        with self.assertRaises(Exception):
+        @MyFrame
+        async def f4():
+            MyPrimitive2()
+        with self.assertRaises(TypeError):
+            self.loop.run(f4)
+
+        with self.assertRaises(InvalidOperationException):
             MyPrimitive()
+
+    def test_frameclassargs(self):
+        class MyFrame2(Frame):
+            def __init__(self, param, kwparam):
+                super().__init__()
+                log.debug("param=%s" % param)
+                log.debug("kwparam=%s" % kwparam)
+        @MyFrame2('param_value', kwparam='kwparam_value')
+        async def main():
+            pass
+        self.loop.run(main)
+        self.assertLogEqual("""
+            0.0: param=param_value
+            0.0: kwparam=kwparam_value
+        """)
 
     def test_Frame_current(self):
         test = self
@@ -354,21 +377,35 @@ class TestAsyncFrames(unittest.TestCase):
         @Frame
         async def main():
             ae = EventSource('my event')
-            raise_event(0.1, ae)
-            raise_event(0.2, ae)
+
+            send_event(0.1, ae)
+            send_event(0.2, ae)
+            e = await ae
+            log.debug("'%s' raised '%s' with args '%s'", e.sender, e.source, e.args)
+            e = await ae
+            log.debug("'%s' reraised '%s' with args '%s'", e.sender, e.source, e.args)
+
+            invoke_event(0.1, ae)
+            invoke_event(0.2, ae)
             e = await ae
             log.debug("'%s' raised '%s' with args '%s'", e.sender, e.source, e.args)
             e = await ae
             log.debug("'%s' reraised '%s' with args '%s'", e.sender, e.source, e.args)
         @Frame
-        async def raise_event(self, seconds, awaitable_event):
+        async def send_event(self, seconds, awaitable_event):
             await sleep(seconds)
             awaitable_event.send(self, 'my event args')
+        @Frame
+        async def invoke_event(self, seconds, awaitable_event):
+            await sleep(seconds)
+            awaitable_event.invoke(self, 'my event args')
 
         self.loop.run(main)
         self.assertLogEqual("""
-            0.1: 'raise_event' raised 'my event' with args 'my event args'
-            0.2: 'raise_event' reraised 'my event' with args 'my event args'
+            0.1: 'send_event' raised 'my event' with args 'my event args'
+            0.2: 'send_event' reraised 'my event' with args 'my event args'
+            0.3: 'invoke_event' raised 'my event' with args 'my event args'
+            0.4: 'invoke_event' reraised 'my event' with args 'my event args'
         """)
 
     def test_exceptions(self):
@@ -449,6 +486,41 @@ class TestAsyncFrames(unittest.TestCase):
             await sleep()
             await sleep()
         self.loop.run(frame)
+
+    def test_rerun(self):
+        @Frame
+        async def main():
+            await wait(0.1, 'main')
+        @Frame
+        async def raise_exception():
+            raise ZeroDivisionError
+        self.loop.run(main)
+        self.loop.run(main)
+        with self.assertRaises(ZeroDivisionError):
+            self.loop.run(raise_exception)
+        self.loop.run(main)
+        self.assertLogEqual("""
+            0.1: main
+            0.2: main
+            0.3: main
+        """)
+
+    def test_meta(self):
+        test = self
+        @Frame
+        async def main(self):
+            test.assertEqual(str(self), "main")
+            test.assertRegex(repr(self), r"<asyncframes.main object at 0x\w*>")
+        self.loop.run(main)
+
+    def test_invalid_usage(self):
+        @Frame
+        def raise_already_running():
+            self.loop.run(wait, 0.0, '')
+        with self.assertRaisesRegex(InvalidOperationException, "Another event loop is already running"):
+            self.loop.run(raise_already_running)
+        with self.assertRaisesRegex(InvalidOperationException, "Can't call frame without a running event loop"):
+            wait(0.0, '')
 
 class TestPyQt5EventLoop(TestAsyncFrames):
     def setUp(self):

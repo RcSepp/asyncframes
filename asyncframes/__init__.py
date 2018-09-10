@@ -12,10 +12,20 @@ import sys
 
 __all__ = [
     'all_', 'animate', 'any_', 'Awaitable', 'Event', 'AbstractEventLoop',
-    'EventSource', 'Frame', 'hold', 'Primitive', 'sleep'
+    'EventSource', 'Frame', 'InvalidOperationException', 'hold', 'Primitive', 'sleep'
 ]
 __version__ = '1.0.1'
 
+
+class InvalidOperationException(Exception):
+    """Raised when operations are performed out of context.
+
+    Args:
+        msg (str): Human readable string describing the exception
+    """
+
+    def __init__(self, msg):
+        super().__init__(msg)
 
 class AbstractEventLoop(metaclass=abc.ABCMeta):
     """Abstract base class of event loops."""
@@ -36,13 +46,13 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         self.mainframe = None
         self.passive_frame_exception_handler = None
 
-    def run(self, frame):
+    def run(self, frame, *frameargs, **framekwargs):
         if AbstractEventLoop._current is not None:
-            raise Exception("Another event loop is already running")
+            raise InvalidOperationException("Another event loop is already running")
         AbstractEventLoop._current = self
 
         try:
-            self.mainframe = frame()
+            self.mainframe = frame(*frameargs, **framekwargs)
             if not self.mainframe.removed:
                 self._run()
         finally:
@@ -524,6 +534,8 @@ class Frame(Awaitable):
     def __new__(cls, *frameclassargs, **frameclasskwargs):
         def ___new__(framefunc):
             def create_frame(*frameargs, **framekwargs):
+                if AbstractEventLoop._current is None:
+                    raise InvalidOperationException("Can't call frame without a running event loop")
                 frame = super(Frame, cls).__new__(cls)
                 frame.__init__(*frameclassargs, **frameclasskwargs)
                 frame.create(framefunc, *frameargs, **framekwargs)
@@ -667,7 +679,7 @@ class Primitive(object):
         while self._owner and not issubclass(type(self._owner), owner):
             self._owner = self._owner._parent
         if not self._owner:
-            raise Exception(self.__class__.__name__ + " can't be defined outside " + owner.__name__)
+            raise InvalidOperationException(self.__class__.__name__ + " can't be defined outside " + owner.__name__)
 
         # Register with parent frame
         self._owner._primitives.append(self)
