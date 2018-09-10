@@ -33,6 +33,7 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         raise NotImplementedError # pragma: no cover
 
     def __init__(self):
+        self.mainframe = None
         self.passive_frame_exception_handler = None
 
     def run(self, frame):
@@ -45,6 +46,7 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
             if not self.mainframe.removed:
                 self._run()
         finally:
+            self.mainframe = None
             AbstractEventLoop._current = None
             Frame._current = None
 
@@ -52,15 +54,21 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         # Discard events sent after the event loop has been closed
         if self != AbstractEventLoop._current: return
 
+        # Save current frame, since it will be modified inside Awaitable.process()
+        currentframe = Frame._current
+
         try:
             event.source.process(event.source, event)
         except Exception as err:
             if self.passive_frame_exception_handler:
                 self.passive_frame_exception_handler(err)
             else:
-                raise
+                raise # pragma: no cover
+        finally:
+            # Restore current frame
+            Frame._current = currentframe
 
-        if self.mainframe.removed: # If the main frame finished
+        if self.mainframe and self.mainframe.removed: # If the main frame finished
             self._stop()
             return False
 
