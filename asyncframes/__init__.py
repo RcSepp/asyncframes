@@ -475,6 +475,7 @@ class animate(EventSource):
         self.callback = callback
         self.interval = interval
         self.startTime = datetime.datetime.now()
+        self._final_event = False
 
         # Raise event
         AbstractEventLoop._current.postevent(Event(self, self, None), delay=interval)
@@ -483,7 +484,7 @@ class animate(EventSource):
         """Re-invoke the animation event until the timeout is reached."""
         t = (datetime.datetime.now() - self.startTime).total_seconds()
 
-        if t >= self.seconds:
+        if t >= self.seconds or self._final_event:
             self.callback(1.0)
             self._result = msg
             self.remove()
@@ -492,9 +493,14 @@ class animate(EventSource):
             raise stop
         else:
             self.callback(t / self.seconds)
+            t = (datetime.datetime.now() - self.startTime).total_seconds() # Recompute t after callback
 
             # Reraise event
-            AbstractEventLoop._current.postevent(Event(self, self, None), delay=min(self.interval, self.seconds - t))
+            if self.seconds - t <= self.interval:
+                self._final_event = True
+                AbstractEventLoop._current.postevent(Event(self, self, None), delay=self.seconds - t)
+            else:
+                AbstractEventLoop._current.postevent(Event(self, self, None), delay=self.interval)
 
 
 class Frame(Awaitable):
