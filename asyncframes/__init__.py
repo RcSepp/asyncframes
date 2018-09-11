@@ -278,7 +278,7 @@ class Event():
         return str(self.source)
 
 class all_(Awaitable):
-    """An awaitable that blocks the awaiting frame until all passed awaitables woke up.
+    """An awaitable that blocks the awaiting frame until all passed awaitables have woken up.
 
     Args:
         *awaitables (Awaitable[]): A list of all awaitables to await
@@ -287,7 +287,15 @@ class all_(Awaitable):
     def __init__(self, *awaitables):
         super().__init__("all({})".format(", ".join(str(a) for a in awaitables)))
 
-        self._result = {awaitable:awaitable._result for awaitable in awaitables if awaitable.removed}
+        self._awaitables = set()
+        self._result = {}
+        for awaitable in awaitables:
+            if awaitable.removed:
+                self._result[awaitable] = awaitable._result
+            else:
+                self._awaitables.add(awaitable)
+                awaitable._listeners.add(self)
+
         if len(self._result) == len(awaitables):
             super().remove()
             return
@@ -295,34 +303,6 @@ class all_(Awaitable):
         self._parent = Frame._current
         if self._parent:
             self._parent._children.append(self)
-
-        # Adopt awaitables
-        self._children = [awaitable for awaitable in awaitables if not awaitable.removed]
-        for child in self._children: # Note: This loop also erases identical children
-            if child._parent:
-                child._parent._children.remove(child)
-            child._parent = self
-
-        self._num_children = len(self._children)
-
-    def __await__(self):
-        if self.removed: # If this awaitable already finished
-            return self._result
-        listener = Frame._current
-        self._listeners.add(listener)
-        for child in self._children:
-            child._listeners.add(self)
-        try:
-            while True:
-                msg = yield self
-                if isinstance(msg, BaseException):
-                    raise msg
-        except (StopIteration, GeneratorExit):
-            return self._result
-        finally:
-            self._listeners.remove(listener)
-            for child in self._children:
-                child._listeners.remove(self)
 
     def step(self, sender, msg):
         """Respond to an awaking child.
@@ -339,10 +319,12 @@ class all_(Awaitable):
         if isinstance(msg, BaseException):
             if type(msg) == StopIteration:
                 self._result[sender] = msg.value
+                self._awaitables.remove(sender)
+                sender._listeners.remove(self)
             elif type(msg) != GeneratorExit:
                 raise msg
 
-        if len(self._result) == self._num_children: # If _num_children results have been received
+        if not self._awaitables:
             self.remove()
             stop = StopIteration()
             stop.value = self._result
@@ -357,8 +339,9 @@ class all_(Awaitable):
 
         if not super().remove():
             return False
-        for child in self._children:
-            child.remove()
+        for awaitable in self._awaitables:
+            awaitable._listeners.remove(self)
+        self._awaitables.clear()
         if self._parent:
             self._parent._children.remove(self)
         return True
@@ -373,41 +356,19 @@ class any_(Awaitable):
     def __init__(self, *awaitables):
         super().__init__("any({})".format(", ".join(str(a) for a in awaitables)))
 
+        self._awaitables = set()
         for awaitable in awaitables:
             if awaitable.removed:
                 self._result = awaitable._result
                 super().remove()
                 return
+            else:
+                self._awaitables.add(awaitable)
+                awaitable._listeners.add(self)
 
         self._parent = Frame._current
         if self._parent:
             self._parent._children.append(self)
-
-        # Adopt awaitables
-        self._children = list(awaitables)
-        for child in self._children: # Note: This loop also erases identical children
-            if child._parent:
-                child._parent._children.remove(child)
-            child._parent = self
-
-    def __await__(self):
-        if self.removed: # If this awaitable already finished
-            return self._result
-        listener = Frame._current
-        self._listeners.add(listener)
-        for child in self._children:
-            child._listeners.add(self)
-        try:
-            while True:
-                msg = yield self
-                if isinstance(msg, BaseException):
-                    raise msg
-        except (StopIteration, GeneratorExit):
-            return self._result
-        finally:
-            self._listeners.remove(listener)
-            for child in self._children:
-                child._listeners.remove(self)
 
     def step(self, sender, msg):
         """Respond to an awaking child.
@@ -436,8 +397,9 @@ class any_(Awaitable):
 
         if not super().remove():
             return False
-        for child in self._children:
-            child.remove()
+        for awaitable in self._awaitables:
+            awaitable._listeners.remove(self)
+        self._awaitables.clear()
         if self._parent:
             self._parent._children.remove(self)
         return True

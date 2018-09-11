@@ -39,7 +39,11 @@ class TestAsyncFrames(unittest.TestCase):
             EVENTLOOP_CLASS = self.loop.__class__
 
         # Register event handler for exceptions raised within passive frames
-        self.loop.passive_frame_exception_handler = lambda err: log.debug("Passive frame exception caught: " + repr(err))
+        def passive_frame_exception_handler(err):
+            if isinstance(err, AssertionError):
+                raise err # Raise unittest assertions
+            log.debug("Passive frame exception caught: " + repr(err))
+        self.loop.passive_frame_exception_handler = passive_frame_exception_handler
 
         # Create logger for debugging program flow using time stamped log messages
         # Create time stamped log messages using log.debug(...)
@@ -521,6 +525,30 @@ class TestAsyncFrames(unittest.TestCase):
             self.loop.run(raise_already_running)
         with self.assertRaisesRegex(InvalidOperationException, "Can't call frame without a running event loop"):
             wait(0.0, '')
+
+    def test_reawait(self):
+        @Frame
+        async def main():
+            s1 = sleep(0.1)
+            s2 = sleep(0.2)
+            s3 = sleep(0.3)
+            self.assertEqual((await (s1 | s2)).source, s1)
+            log.debug('1')
+            self.assertEqual((await (s2 | s3)).source, s2)
+            log.debug('2')
+            self.assertEqual(set([v.source for v in (await (s2 & s3)).values()]), set([s2, s3]))
+            log.debug('3')
+            await s1
+            await s2
+            await s3
+            log.debug('4')
+        self.loop.run(main)
+        self.assertLogEqual("""
+            0.1: 1
+            0.2: 2
+            0.3: 3
+            0.3: 4
+        """)
 
     def test_free(self):
         @Frame
