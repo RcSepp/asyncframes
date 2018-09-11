@@ -2,6 +2,7 @@
 # Copyright (c) Sebastian Klaassen. All Rights Reserved.
 # Distributed under the MIT License. See LICENSE file for more info.
 
+import functools
 import traceback
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QTimer
@@ -23,4 +24,4 @@ class EventLoop(asyncframes.AbstractEventLoop):
         QApplication.instance().exit()
 
     def _post(self, event, delay):
-        QTimer.singleShot(1000 * delay, lambda: self.sendevent(event))
+        QTimer.singleShot(1000 * delay, functools.partial(self.sendevent, event))
