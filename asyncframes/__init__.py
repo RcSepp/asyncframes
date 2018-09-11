@@ -478,7 +478,7 @@ class animate(EventSource):
             # Reraise event
             if self.seconds - t <= self.interval:
                 self._final_event = True
-                AbstractEventLoop._current.postevent(Event(self, self, None), delay=self.seconds - t)
+                AbstractEventLoop._current.postevent(Event(self, self, None), delay=max(0, self.seconds - t))
             else:
                 AbstractEventLoop._current.postevent(Event(self, self, None), delay=self.interval)
 
