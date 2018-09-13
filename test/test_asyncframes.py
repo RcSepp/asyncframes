@@ -6,8 +6,10 @@ import datetime
 import io
 import logging
 import math
+import threading
+import time
 import unittest
-from asyncframes import sleep, hold, animate, InvalidOperationException, EventSource, Frame, Primitive
+from asyncframes import sleep, hold, animate, InvalidOperationException, EventSource, Frame, Primitive, AbstractEventLoop
 
 class MyFrame(Frame):
     @staticmethod
@@ -37,6 +39,9 @@ class TestAsyncFrames(unittest.TestCase):
             print()
             print("Using {}.{}".format(self.loop.__class__.__module__, self.loop.__class__.__name__))
             EVENTLOOP_CLASS = self.loop.__class__
+        
+        # Check if the event loop class implements AbstractEventLoop._invoke
+        self.supports_invoke = self.loop.__class__._invoke != AbstractEventLoop._invoke
 
         # Register event handler for exceptions raised within passive frames
         def passive_frame_exception_handler(err):
@@ -389,27 +394,45 @@ class TestAsyncFrames(unittest.TestCase):
             e = await ae
             log.debug("'%s' reraised '%s' with args '%s'", e.sender, e.source, e.args)
 
-            invoke_event(0.1, ae)
-            invoke_event(0.2, ae)
+            post_event(0.1, ae)
+            post_event(0.2, ae)
             e = await ae
             log.debug("'%s' raised '%s' with args '%s'", e.sender, e.source, e.args)
             e = await ae
             log.debug("'%s' reraised '%s' with args '%s'", e.sender, e.source, e.args)
+
+            if self.supports_invoke:
+                threading.Thread(target=invoke_event, args=(0.1, ae)).start()
+                threading.Thread(target=invoke_event, args=(0.2, ae)).start()
+                e = await ae
+                log.debug("'%s' raised '%s' with args '%s'", e.sender, e.source, e.args)
+                e = await ae
+                log.debug("'%s' reraised '%s' with args '%s'", e.sender, e.source, e.args)
+            else:
+                await sleep(0.1)
+                log.debug("'invoke_event' raised 'my event' with args 'my event args'")
+                await sleep(0.1)
+                log.debug("'invoke_event' reraised 'my event' with args 'my event args'")
         @Frame
         async def send_event(self, seconds, awaitable_event):
             await sleep(seconds)
             awaitable_event.send(self, 'my event args')
         @Frame
-        async def invoke_event(self, seconds, awaitable_event):
+        async def post_event(self, seconds, awaitable_event):
             await sleep(seconds)
-            awaitable_event.invoke(self, 'my event args')
+            awaitable_event.post(self, 'my event args')
+        def invoke_event(seconds, awaitable_event):
+            time.sleep(seconds)
+            awaitable_event.invoke('invoke_event', 'my event args')
 
         self.loop.run(main)
         self.assertLogEqual("""
             0.1: 'send_event' raised 'my event' with args 'my event args'
             0.2: 'send_event' reraised 'my event' with args 'my event args'
-            0.3: 'invoke_event' raised 'my event' with args 'my event args'
-            0.4: 'invoke_event' reraised 'my event' with args 'my event args'
+            0.3: 'post_event' raised 'my event' with args 'my event args'
+            0.4: 'post_event' reraised 'my event' with args 'my event args'
+            0.5: 'invoke_event' raised 'my event' with args 'my event args'
+            0.6: 'invoke_event' reraised 'my event' with args 'my event args'
         """)
 
     def test_exceptions(self):

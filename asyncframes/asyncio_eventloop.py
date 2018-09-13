@@ -22,3 +22,9 @@ class EventLoop(asyncframes.AbstractEventLoop):
             self.loop.call_soon(self.sendevent, event)
         else:
             self.loop.call_later(delay, self.sendevent, event)
+
+    def _invoke(self, event, delay):
+        if delay <= 0:
+            self.loop.call_soon_threadsafe(self.sendevent, event)
+        else:
+            self.loop.call_soon_threadsafe(self.loop.call_later, delay, self.sendevent, event)

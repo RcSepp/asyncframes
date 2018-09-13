@@ -28,10 +28,12 @@ async def progress_reporter(self):
 async def main_frame(self):
     pr = progress_reporter()
     for progress in range(0, 100, 13):
-        pr.progress.invoke(self, progress)
+        pr.progress.post(self, progress)
         if progress > 20:
-            break
+            return
         await sleep(1)
+    pr.progress.post(self, 100)
+    await pr
 
 loop = EventLoop()
 loop.run(main_frame)

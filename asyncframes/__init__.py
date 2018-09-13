@@ -41,6 +41,9 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def _post(self, event, delay):
         raise NotImplementedError # pragma: no cover
+    def _invoke(self, event, delay):
+        logging.warning("Thread-safe event posting not available for this event loop. Falling back to non-thread-safe event posting") # pragma: no cover
+        self._post(event, delay) # pragma: no cover
 
     def __init__(self):
         self.mainframe = None
@@ -89,6 +92,12 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         if self != AbstractEventLoop._current: return
 
         self._post(event, delay)
+
+    def invokeevent(self, event, delay=0):
+        # Discard events sent after the event loop has been closed
+        if self != AbstractEventLoop._current: return
+
+        self._invoke(event, delay)
 
 
 class Awaitable(collections.abc.Awaitable):
@@ -215,6 +224,7 @@ class EventSource(Awaitable):
     def __init__(self, name, autoremove=False):
         super().__init__(name)
         self.autoremove = autoremove
+
     def remove(self):
         """Remove this awaitable from the frame hierarchy.
 
@@ -225,6 +235,7 @@ class EventSource(Awaitable):
         """
 
         return super().remove() if self.autoremove else False
+
     def step(self, sender, msg):
         """Handle incoming events.
 
@@ -241,6 +252,7 @@ class EventSource(Awaitable):
         stop = StopIteration()
         stop.value = msg
         raise stop
+
     def send(self, sender, args=None):
         """Dispatch and immediately process an event.
 
@@ -250,7 +262,8 @@ class EventSource(Awaitable):
         """
 
         AbstractEventLoop._current.sendevent(Event(sender, self, args))
-    def invoke(self, sender, args=None):
+
+    def post(self, sender, args=None):
         """Enqueue an event in the event loop.
 
         Args:
@@ -259,6 +272,16 @@ class EventSource(Awaitable):
         """
 
         AbstractEventLoop._current.postevent(Event(sender, self, args))
+
+    def invoke(self, sender, args=None):
+        """Enqueue an event in the event loop from a different thread.
+
+        Args:
+            sender: The entity triggering the event, for example, the button instance on a button-press event
+            args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event
+        """
+
+        AbstractEventLoop._current.invokeevent(Event(sender, self, args))
 
 class Event():
     """Data structure, containing information about the occurance of an event.
@@ -461,7 +484,7 @@ class animate(EventSource):
         AbstractEventLoop._current.postevent(Event(self, self, None), delay=interval)
 
     def step(self, sender, msg):
-        """Re-invoke the animation event until the timeout is reached."""
+        """Resend the animation event until the timeout is reached."""
         t = (datetime.datetime.now() - self.startTime).total_seconds()
 
         if t >= self.seconds or self._final_event:
