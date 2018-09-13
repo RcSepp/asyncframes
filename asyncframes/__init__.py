@@ -674,6 +674,8 @@ class Primitive(object):
     """
 
     def __init__(self, owner):
+        self._removed = False
+
         # Validate parameters
         if not issubclass(owner, Frame):
             raise TypeError("'owner' must be of type Frame")
@@ -689,10 +691,14 @@ class Primitive(object):
         self._owner._primitives.append(self)
 
     def remove(self):
-        """Remove this awaitable from the frame hierarchy.
+        """Remove this primitive from its owner.
 
         Returns:
             bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
         """
 
+        if self._removed:
+            return False
+        self._removed = True
         self._owner._primitives.remove(self)
+        return True
