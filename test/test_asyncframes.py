@@ -436,8 +436,9 @@ class TestAsyncFrames(unittest.TestCase):
         """)
 
     def test_custom_event(self):
+        test = self
         @Frame
-        async def main():
+        async def main(self):
             ae = EventSource('my event')
 
             send_event(0.1, ae)
@@ -448,15 +449,15 @@ class TestAsyncFrames(unittest.TestCase):
             log.debug("'%s' reraised '%s' with args '%s'", e.sender, e.source, e.args)
 
             post_event(0.1, ae)
-            post_event(0.2, ae)
+            ae.post(self, 'my event args', 0.2)
             e = await ae
             log.debug("'%s' raised '%s' with args '%s'", e.sender, e.source, e.args)
             e = await ae
             log.debug("'%s' reraised '%s' with args '%s'", e.sender, e.source, e.args)
 
-            if self.supports_invoke:
+            if test.supports_invoke:
                 threading.Thread(target=invoke_event, args=(0.1, ae)).start()
-                threading.Thread(target=invoke_event, args=(0.2, ae)).start()
+                threading.Thread(target=ae.invoke, args=(self, 'my event args', 0.2)).start()
                 e = await ae
                 log.debug("'%s' raised '%s' with args '%s'", e.sender, e.source, e.args)
                 e = await ae
@@ -465,7 +466,7 @@ class TestAsyncFrames(unittest.TestCase):
                 await sleep(0.1)
                 log.debug("'invoke_event' raised 'my event' with args 'my event args'")
                 await sleep(0.1)
-                log.debug("'invoke_event' reraised 'my event' with args 'my event args'")
+                log.debug("'main' reraised 'my event' with args 'my event args'")
         @Frame
         async def send_event(self, seconds, awaitable_event):
             await sleep(seconds)
@@ -483,9 +484,9 @@ class TestAsyncFrames(unittest.TestCase):
             0.1: 'send_event' raised 'my event' with args 'my event args'
             0.2: 'send_event' reraised 'my event' with args 'my event args'
             0.3: 'post_event' raised 'my event' with args 'my event args'
-            0.4: 'post_event' reraised 'my event' with args 'my event args'
+            0.4: 'main' reraised 'my event' with args 'my event args'
             0.5: 'invoke_event' raised 'my event' with args 'my event args'
-            0.6: 'invoke_event' reraised 'my event' with args 'my event args'
+            0.6: 'main' reraised 'my event' with args 'my event args'
         """)
 
     def test_exceptions(self):

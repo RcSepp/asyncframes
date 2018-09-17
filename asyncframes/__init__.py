@@ -263,25 +263,27 @@ class EventSource(Awaitable):
 
         AbstractEventLoop._current.sendevent(Event(sender, self, args))
 
-    def post(self, sender, args=None):
+    def post(self, sender, args=None, delay=0):
         """Enqueue an event in the event loop.
 
         Args:
             sender: The entity triggering the event, for example, the button instance on a button-press event
             args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event
+            delay (float, optional): Defaults to 0. The time in seconds to wait before posting the event
         """
 
-        AbstractEventLoop._current.postevent(Event(sender, self, args))
+        AbstractEventLoop._current.postevent(Event(sender, self, args), delay)
 
-    def invoke(self, sender, args=None):
+    def invoke(self, sender, args=None, delay=0):
         """Enqueue an event in the event loop from a different thread.
 
         Args:
             sender: The entity triggering the event, for example, the button instance on a button-press event
             args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event
+            delay (float, optional): Defaults to 0. The time in seconds to wait before invoking the event
         """
 
-        AbstractEventLoop._current.invokeevent(Event(sender, self, args))
+        AbstractEventLoop._current.invokeevent(Event(sender, self, args), delay)
 
 class Event():
     """Data structure, containing information about the occurance of an event.
