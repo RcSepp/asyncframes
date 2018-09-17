@@ -438,18 +438,13 @@ class sleep(EventSource):
 
     Args:
         seconds (float, optional): Defaults to 0. The duration to wait
-
-    Raises:
-        ValueError: Raised when sleep is constructed with a negative duration
     """
 
     def __init__(self, seconds=0.0):
-        if seconds < 0:
-            raise ValueError()
         super().__init__("sleep({})".format(seconds), autoremove=True)
 
         # Raise event
-        AbstractEventLoop._current.postevent(Event(self, self, None), delay=seconds)
+        AbstractEventLoop._current.postevent(Event(self, self, None), delay=max(0, seconds))
 
 class hold(EventSource):
     """An awaitable used for suspending execution indefinitely.

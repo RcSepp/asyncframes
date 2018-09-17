@@ -100,9 +100,12 @@ class TestAsyncFrames(unittest.TestCase):
     def test_negative_sleep_duration(self):
         @MyFrame
         async def main():
-            with self.assertRaises(ValueError):
-                sleep(-1)
+            await sleep(-1)
+            log.debug('done')
         self.loop.run(main)
+        self.assertLogEqual("""
+            0.0: done
+        """)
 
     def test_await_order_1(self):
         @MyFrame
