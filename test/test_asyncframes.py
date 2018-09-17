@@ -315,6 +315,59 @@ class TestAsyncFrames(unittest.TestCase):
             0.0: 3
         """)
 
+    def test_reremove(self):
+        test = self
+        class MyPrimitive(Primitive):
+            def __init__(self):
+                super().__init__(Frame)
+        @Frame
+        async def remove_after(frame, seconds):
+            await sleep(seconds)
+            log.debug('Removing frame')
+            frame.remove()
+        @Frame
+        async def main(self):
+            self.p = None
+            @Frame
+            async def primitive_owner():
+                self.p = MyPrimitive()
+                await sleep(0.1)
+                log.debug('Removing primitive')
+            primitive_owner()
+
+            remove_after(self, 0.3)
+            a = (self.free | sleep(0.1))
+            await a
+            log.debug('Re-removing any_')
+            test.assertEqual(a.remove(), False)
+
+            s = sleep(0.1)
+            a = (self.free & s)
+            await a
+            log.debug('Re-removing all_')
+            test.assertEqual(a.remove(), False)
+
+            log.debug('Re-removing event source')
+            test.assertEqual(s.remove(), False)
+
+            log.debug('Re-removing primitive')
+            test.assertEqual(self.p.remove(), False)
+
+            log.debug('Re-removing frame')
+            test.assertEqual(self.remove(), False)
+        self.loop.run(main)
+        log.debug('done')
+        self.assertLogEqual("""
+            0.1: Removing primitive
+            0.1: Re-removing any_
+            0.3: Removing frame
+            0.3: Re-removing all_
+            0.3: Re-removing event source
+            0.3: Re-removing primitive
+            0.3: Re-removing frame
+            0.3: done
+        """)
+
     def test_awaited_by_multiple(self):
         @Frame
         async def waitfor(w):
