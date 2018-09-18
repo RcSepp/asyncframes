@@ -1,6 +1,6 @@
-=====================================================
-asyncframes - Object oriented coroutines for everyone
-=====================================================
+=====================================
+asyncframes - Coroutines for everyone
+=====================================
 
 .. image:: https://travis-ci.org/RcSepp/asyncframes.svg?branch=master
     :target: https://travis-ci.org/RcSepp/asyncframes
