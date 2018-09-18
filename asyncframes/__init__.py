@@ -14,7 +14,7 @@ __all__ = [
     'all_', 'animate', 'any_', 'Awaitable', 'Event', 'AbstractEventLoop',
     'EventSource', 'Frame', 'InvalidOperationException', 'hold', 'Primitive', 'sleep'
 ]
-__version__ = '1.0.1'
+__version__ = '1.1.0'
 
 
 class InvalidOperationException(Exception):
