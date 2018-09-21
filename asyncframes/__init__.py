@@ -8,6 +8,7 @@ import datetime
 import inspect
 import logging
 import sys
+import threading
 
 
 __all__ = [
@@ -15,6 +16,13 @@ __all__ = [
     'EventSource', 'Frame', 'InvalidOperationException', 'hold', 'Primitive', 'sleep'
 ]
 __version__ = '1.1.0'
+
+
+class ThreadLocals(threading.local):
+    def __init__(self):
+        self.__dict__['_current_eventloop'] = None
+        self.__dict__['_current_frame'] = None
+_THREAD_LOCALS = ThreadLocals()
 
 
 class InvalidOperationException(Exception):
@@ -50,9 +58,9 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         self.passive_frame_exception_handler = None
 
     def run(self, frame, *frameargs, **framekwargs):
-        if AbstractEventLoop._current is not None:
+        if _THREAD_LOCALS._current_eventloop is not None:
             raise InvalidOperationException("Another event loop is already running")
-        AbstractEventLoop._current = self
+        _THREAD_LOCALS._current_eventloop = self
 
         try:
             self.mainframe = frame(*frameargs, **framekwargs)
@@ -60,15 +68,15 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
                 self._run()
         finally:
             self.mainframe = None
-            AbstractEventLoop._current = None
-            Frame._current = None
+            _THREAD_LOCALS._current_eventloop = None
+            _THREAD_LOCALS._current_frame = None
 
     def sendevent(self, event):
         # Discard events sent after the event loop has been closed
-        if self != AbstractEventLoop._current: return
+        if self != _THREAD_LOCALS._current_eventloop: return
 
         # Save current frame, since it will be modified inside Awaitable.process()
-        currentframe = Frame._current
+        currentframe = _THREAD_LOCALS._current_frame
 
         try:
             event.source.process(event.source, event)
@@ -79,7 +87,7 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
                 raise # pragma: no cover
         finally:
             # Restore current frame
-            Frame._current = currentframe
+            _THREAD_LOCALS._current_frame = currentframe
 
         if self.mainframe and self.mainframe.removed: # If the main frame finished
             self._stop()
@@ -89,14 +97,11 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
 
     def postevent(self, event, delay=0):
         # Discard events sent after the event loop has been closed
-        if self != AbstractEventLoop._current: return
+        if self != _THREAD_LOCALS._current_eventloop: return
 
         self._post(event, delay)
 
     def invokeevent(self, event, delay=0):
-        # Discard events sent after the event loop has been closed
-        if self != AbstractEventLoop._current: return
-
         self._invoke(event, delay)
 
 
@@ -149,7 +154,7 @@ class Awaitable(collections.abc.Awaitable):
     def __await__(self):
         if self.removed: # If this awaitable already finished
             return self._result
-        listener = Frame._current
+        listener = _THREAD_LOCALS._current_frame
         self._listeners.add(listener)
         try:
             while True:
@@ -173,7 +178,7 @@ class Awaitable(collections.abc.Awaitable):
             msg: The incomming event or propagated message
         """
 
-        Frame._current = self # Activate self
+        _THREAD_LOCALS._current_frame = self # Activate self
         try:
             msg = self.step(sender, msg)
         except (StopIteration, GeneratorExit) as err:
@@ -224,6 +229,7 @@ class EventSource(Awaitable):
     def __init__(self, name, autoremove=False):
         super().__init__(name)
         self.autoremove = autoremove
+        self.eventloop = _THREAD_LOCALS._current_eventloop
 
     def remove(self):
         """Remove this awaitable from the frame hierarchy.
@@ -261,7 +267,7 @@ class EventSource(Awaitable):
             args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event
         """
 
-        AbstractEventLoop._current.sendevent(Event(sender, self, args))
+        _THREAD_LOCALS._current_eventloop.sendevent(Event(sender, self, args))
 
     def post(self, sender, args=None, delay=0):
         """Enqueue an event in the event loop.
@@ -272,7 +278,7 @@ class EventSource(Awaitable):
             delay (float, optional): Defaults to 0. The time in seconds to wait before posting the event
         """
 
-        AbstractEventLoop._current.postevent(Event(sender, self, args), delay)
+        _THREAD_LOCALS._current_eventloop.postevent(Event(sender, self, args), delay)
 
     def invoke(self, sender, args=None, delay=0):
         """Enqueue an event in the event loop from a different thread.
@@ -283,7 +289,7 @@ class EventSource(Awaitable):
             delay (float, optional): Defaults to 0. The time in seconds to wait before invoking the event
         """
 
-        AbstractEventLoop._current.invokeevent(Event(sender, self, args), delay)
+        self.eventloop.invokeevent(Event(sender, self, args), delay)
 
 class Event():
     """Data structure, containing information about the occurance of an event.
@@ -325,7 +331,7 @@ class all_(Awaitable):
             super().remove()
             return
 
-        self._parent = Frame._current
+        self._parent = _THREAD_LOCALS._current_frame
         if self._parent:
             self._parent._children.append(self)
 
@@ -391,7 +397,7 @@ class any_(Awaitable):
                 self._awaitables.add(awaitable)
                 awaitable._listeners.add(self)
 
-        self._parent = Frame._current
+        self._parent = _THREAD_LOCALS._current_frame
         if self._parent:
             self._parent._children.append(self)
 
@@ -444,7 +450,7 @@ class sleep(EventSource):
         super().__init__("sleep({})".format(seconds), autoremove=True)
 
         # Raise event
-        AbstractEventLoop._current.postevent(Event(self, self, None), delay=max(0, seconds))
+        _THREAD_LOCALS._current_eventloop.postevent(Event(self, self, None), delay=max(0, seconds))
 
 class hold(EventSource):
     """An awaitable used for suspending execution indefinitely.
@@ -478,7 +484,7 @@ class animate(EventSource):
         self._final_event = False
 
         # Raise event
-        AbstractEventLoop._current.postevent(Event(self, self, None), delay=interval)
+        _THREAD_LOCALS._current_eventloop.postevent(Event(self, self, None), delay=interval)
 
     def step(self, sender, msg):
         """Resend the animation event until the timeout is reached."""
@@ -498,9 +504,9 @@ class animate(EventSource):
             # Reraise event
             if self.seconds - t <= self.interval:
                 self._final_event = True
-                AbstractEventLoop._current.postevent(Event(self, self, None), delay=max(0, self.seconds - t))
+                _THREAD_LOCALS._current_eventloop.postevent(Event(self, self, None), delay=max(0, self.seconds - t))
             else:
-                AbstractEventLoop._current.postevent(Event(self, self, None), delay=self.interval)
+                _THREAD_LOCALS._current_eventloop.postevent(Event(self, self, None), delay=self.interval)
 
 
 class Frame(Awaitable):
@@ -511,12 +517,10 @@ class Frame(Awaitable):
     2) Create a frame class by subclassing `Frame` and instantiate the frame class by annotating a coroutine with `@MyFrameClass`.
     """
 
-    _current = None
-
     def __new__(cls, *frameclassargs, **frameclasskwargs):
         def ___new__(framefunc):
             def create_frame(*frameargs, **framekwargs):
-                if AbstractEventLoop._current is None:
+                if _THREAD_LOCALS._current_eventloop is None:
                     raise InvalidOperationException("Can't call frame without a running event loop")
                 frame = super(Frame, cls).__new__(cls)
                 frame.__init__(*frameclassargs, **frameclasskwargs)
@@ -533,7 +537,7 @@ class Frame(Awaitable):
 
     def __init__(self):
         super().__init__(self.__class__.__name__)
-        self._parent = Frame._current
+        self._parent = _THREAD_LOCALS._current_frame
         if self._parent:
             self._parent._children.append(self)
         self._children = []
@@ -555,7 +559,7 @@ class Frame(Awaitable):
             self.free.__name__ = str(self.__name__) + ".free"
 
             # Activate self
-            Frame._current = self
+            _THREAD_LOCALS._current_frame = self
 
             hasself = 'self' in inspect.signature(framefunc).parameters
             self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
@@ -568,10 +572,10 @@ class Frame(Awaitable):
                     pass
                 finally:
                     # Activate parent
-                    Frame._current = self._parent
+                    _THREAD_LOCALS._current_frame = self._parent
             else:
                 # Activate parent
-                Frame._current = self._parent
+                _THREAD_LOCALS._current_frame = self._parent
 
     def step(self, sender, msg):
         """Resume the frame coroutine.
@@ -612,7 +616,7 @@ class Frame(Awaitable):
             return False
 
         # Send frame free event
-        AbstractEventLoop._current.sendevent(Event(self, self.free, None))
+        _THREAD_LOCALS._current_eventloop.sendevent(Event(self, self.free, None))
 
         if self.removed: # If this frame was closed in response to the free event, ...
             return False
@@ -644,7 +648,7 @@ class Frame(Awaitable):
                 self._generator = None
 
         # Post frame removed event
-        AbstractEventLoop._current.postevent(Event(self, self, None))
+        _THREAD_LOCALS._current_eventloop.postevent(Event(self, self, None))
 
         # Remove awaitable
         super().remove()
@@ -678,7 +682,7 @@ class Primitive(object):
             raise TypeError("'owner' must be of type Frame")
 
         # Find parent frame of class 'owner'
-        self._owner = Frame._current
+        self._owner = _THREAD_LOCALS._current_frame
         while self._owner and not issubclass(type(self._owner), owner):
             self._owner = self._owner._parent
         if not self._owner:

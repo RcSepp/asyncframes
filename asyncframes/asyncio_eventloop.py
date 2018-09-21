@@ -9,7 +9,10 @@ import asyncframes
 class EventLoop(asyncframes.AbstractEventLoop):
     def __init__(self):
         super().__init__()
-        self.loop = asyncio.get_event_loop()
+        try:
+            self.loop = asyncio.get_event_loop()
+        except RuntimeError:
+            self.loop = asyncio.new_event_loop()
 
     def _run(self):
         self.loop.run_forever()
