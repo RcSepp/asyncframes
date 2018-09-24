@@ -154,8 +154,6 @@ class Awaitable(collections.abc.Awaitable):
     def __await__(self):
         if self.removed: # If this awaitable already finished
             return self._result
-        listener = _THREAD_LOCALS._current_frame
-        self._listeners.add(listener)
         try:
             while True:
                 msg = yield self
@@ -164,7 +162,7 @@ class Awaitable(collections.abc.Awaitable):
         except (StopIteration, GeneratorExit):
             return self._result
         finally:
-            self._listeners.remove(listener)
+            self._listeners.clear()
 
     @abc.abstractmethod
     def step(self, sender, msg):
@@ -596,7 +594,7 @@ class Frame(Awaitable):
         if self._generator is not None:
             # Advance generator
             try:
-                self._generator.send(msg)
+                awaitable = self._generator.send(msg)
             except StopIteration as stop: # If done
                 self._result = stop.value
                 self.remove()
@@ -604,6 +602,8 @@ class Frame(Awaitable):
             except (GeneratorExit, Exception): # If done
                 self.remove()
                 raise
+            else:
+                awaitable._listeners.add(self)
 
     def remove(self):
         """Remove this awaitable from the frame hierarchy.
