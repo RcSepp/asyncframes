@@ -122,6 +122,7 @@ class Awaitable(collections.abc.Awaitable):
         self._removed = False
         self._result = None
         self._listeners = set()
+
     def remove(self):
         """Remove this awaitable from the frame hierarchy.
 
@@ -346,10 +347,10 @@ class all_(Awaitable):
         """
 
         if isinstance(msg, BaseException):
+            self._awaitables.remove(sender)
+            sender._listeners.remove(self)
             if type(msg) == StopIteration:
                 self._result[sender] = msg.value
-                self._awaitables.remove(sender)
-                sender._listeners.remove(self)
             elif type(msg) != GeneratorExit:
                 raise msg
 
