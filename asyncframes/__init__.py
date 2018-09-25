@@ -5,6 +5,7 @@
 import abc
 import collections.abc
 import datetime
+import enum
 import inspect
 import logging
 import sys
@@ -13,7 +14,8 @@ import threading
 
 __all__ = [
     'all_', 'animate', 'any_', 'Awaitable', 'Event', 'AbstractEventLoop',
-    'EventSource', 'Frame', 'InvalidOperationException', 'hold', 'Primitive', 'sleep'
+    'EventSource', 'Frame', 'FrameStartupBehaviour', 'InvalidOperationException',
+    'hold', 'Primitive', 'sleep'
 ]
 __version__ = '1.1.0'
 
@@ -24,6 +26,9 @@ class ThreadLocals(threading.local):
         self.__dict__['_current_frame'] = None
 _THREAD_LOCALS = ThreadLocals()
 
+class FrameStartupBehaviour(enum.Enum):
+    delayed = enum.auto()
+    immediate = enum.auto()
 
 class InvalidOperationException(Exception):
     """Raised when operations are performed out of context.
@@ -47,11 +52,11 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
     def _stop(self):
         raise NotImplementedError # pragma: no cover
     @abc.abstractmethod
-    def _post(self, event, delay):
+    def _post(self, delay, callback, args):
         raise NotImplementedError # pragma: no cover
-    def _invoke(self, event, delay):
+    def _invoke(self, delay, callback, args):
         logging.warning("Thread-safe event posting not available for this event loop. Falling back to non-thread-safe event posting") # pragma: no cover
-        self._post(event, delay) # pragma: no cover
+        self._post(delay, callback, args) # pragma: no cover
 
     def __init__(self):
         self.mainframe = None
@@ -89,7 +94,7 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
             # Restore current frame
             _THREAD_LOCALS._current_frame = currentframe
 
-        if self.mainframe and self.mainframe.removed: # If the main frame finished
+        if event.source == self.mainframe: # If the main frame finished
             self._stop()
             return False
 
@@ -99,10 +104,25 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         # Discard events sent after the event loop has been closed
         if self != _THREAD_LOCALS._current_eventloop: return
 
-        self._post(event, delay)
+        self._post(delay, self.sendevent, (event,))
 
     def invokeevent(self, event, delay=0):
-        self._invoke(event, delay)
+        self._invoke(delay, self.sendevent, (event,))
+
+    def _start_coroutine(self, frame):
+        # Save current frame, since it will be modified inside Awaitable.process()
+        currentframe = _THREAD_LOCALS._current_frame
+
+        try:
+            frame.process(None, None)
+        except Exception as err:
+            if self.passive_frame_exception_handler:
+                self.passive_frame_exception_handler(err)
+            else:
+                raise # pragma: no cover
+        finally:
+            # Restore current frame
+            _THREAD_LOCALS._current_frame = currentframe
 
 
 class Awaitable(collections.abc.Awaitable):
@@ -240,6 +260,9 @@ class EventSource(Awaitable):
         """
 
         return super().remove() if self.autoremove else False
+
+    def __bool__(self):
+        return self._removed
 
     def step(self, sender, msg):
         """Handle incoming events.
@@ -534,8 +557,9 @@ class Frame(Awaitable):
         else: # If @frame was called with parameters
             return ___new__
 
-    def __init__(self):
+    def __init__(self, startup_behaviour=FrameStartupBehaviour.delayed):
         super().__init__(self.__class__.__name__)
+        self.startup_behaviour = startup_behaviour
         self._parent = _THREAD_LOCALS._current_frame
         if self._parent:
             self._parent._children.append(self)
@@ -543,7 +567,8 @@ class Frame(Awaitable):
         self._activechild = None
         self._primitives = []
         self._generator = None
-        self.free = EventSource(str(self.__name__) + ".free")
+        self.ready = EventSource(str(self.__name__) + ".ready", True)
+        self.free = EventSource(str(self.__name__) + ".free", True)
 
     def create(self, framefunc, *frameargs, **framekwargs):
         """Start the frame function with the given arguments.
@@ -564,24 +589,28 @@ class Frame(Awaitable):
             self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
 
             if inspect.isawaitable(self._generator): # If framefunc is a coroutine
-                # Start coroutine
-                try:
-                    self.step(None, None)
-                except (StopIteration, GeneratorExit):
-                    pass
-                finally:
-                    # Activate parent
-                    _THREAD_LOCALS._current_frame = self._parent
-            else:
-                # Activate parent
-                _THREAD_LOCALS._current_frame = self._parent
+                if self.startup_behaviour == FrameStartupBehaviour.delayed:
+                    # Post coroutine to the event queue
+                    _THREAD_LOCALS._current_eventloop._post(0.0, _THREAD_LOCALS._current_eventloop._start_coroutine, (self,))
+                elif self.startup_behaviour == FrameStartupBehaviour.immediate:
+                    # Start coroutine
+                    try:
+                        self.step(None, None)
+                    except (StopIteration, GeneratorExit):
+                        pass
+                    finally:
+                        # Activate parent
+                        _THREAD_LOCALS._current_frame = self._parent
+
+            # Activate parent
+            _THREAD_LOCALS._current_frame = self._parent
 
     def step(self, sender, msg):
         """Resume the frame coroutine.
 
         Args:
             sender (Awaitable): The resumed awaitable
-            msg (BaseException): A message to be forwarded to the coroutine
+            msg (BaseException): A message to be forwarded to the coroutine or None to start the coroutine
 
         Raises:
             StopIteration: Raised if the coroutine finished with a result
@@ -593,18 +622,25 @@ class Frame(Awaitable):
             raise GeneratorExit
 
         if self._generator is not None:
-            # Advance generator
             try:
-                awaitable = self._generator.send(msg)
-            except StopIteration as stop: # If done
-                self._result = stop.value
-                self.remove()
-                raise
-            except (GeneratorExit, Exception): # If done
-                self.remove()
-                raise
-            else:
-                awaitable._listeners.add(self)
+                awaitable = self._generator.send(msg) # Continue coroutine
+            except StopIteration as stop: # If frame finished with result
+                self._result = stop.value # Set frame result to stop.value
+                if msg is None: self.ready.send(self) # Send ready event after coroutine ran once
+                self.remove() # Remove finished frame
+                raise # Propagate event
+            except GeneratorExit: # If frame finished without result
+                # Frame result stays None
+                if msg is None: self.ready.send(self) # Send ready event after coroutine ran once
+                self.remove() # Remove finished frame
+                raise # Propagate event
+            except Exception as err: # If frame raised exception
+                # Frame result stays None
+                self.remove() # Remove finished frame
+                raise # Propagate event
+            else: # If frame awaits awaitable
+                awaitable._listeners.add(self) # Listen to events of awaitable
+                if msg is None: self.ready.send(self) # Send ready event after coroutine ran once
 
     def remove(self):
         """Remove this awaitable from the frame hierarchy.

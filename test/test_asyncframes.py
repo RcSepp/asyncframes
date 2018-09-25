@@ -9,7 +9,8 @@ import math
 import threading
 import time
 import unittest
-from asyncframes import sleep, hold, animate, InvalidOperationException, EventSource, Frame, Primitive, AbstractEventLoop, _THREAD_LOCALS
+from asyncframes import *
+from asyncframes import _THREAD_LOCALS
 
 class MyFrame(Frame):
     @staticmethod
@@ -248,9 +249,9 @@ class TestAsyncFrames(unittest.TestCase):
 
         @MyFrame2
         async def f2():
-            MyPrimitive()
-        with test.assertRaises(InvalidOperationException):
-            test.loop.run(f2)
+            with test.assertRaises(InvalidOperationException):
+                MyPrimitive()
+        test.loop.run(f2)
 
         @MyFrame
         async def f3():
@@ -259,9 +260,9 @@ class TestAsyncFrames(unittest.TestCase):
 
         @MyFrame
         async def f4():
-            MyPrimitive2()
-        with test.assertRaises(TypeError):
-            test.loop.run(f4)
+            with test.assertRaises(TypeError):
+                MyPrimitive2()
+        test.loop.run(f4)
 
         with test.assertRaises(InvalidOperationException):
             MyPrimitive()
@@ -350,7 +351,7 @@ class TestAsyncFrames(unittest.TestCase):
             @Frame
             async def primitive_owner():
                 self.p = MyPrimitive()
-                await sleep(0.1)
+                await sleep(0.0)
                 test.log.debug('Removing primitive')
             primitive_owner()
 
@@ -377,7 +378,7 @@ class TestAsyncFrames(unittest.TestCase):
         test.loop.run(main)
         test.log.debug('done')
         test.assertLogEqual("""
-            0.1: Removing primitive
+            0.0: Removing primitive
             0.1: Re-removing any_
             0.3: Removing frame
             0.3: Re-removing all_
@@ -532,13 +533,12 @@ class TestAsyncFrames(unittest.TestCase):
                 await (hold() & raise_delayed())
             test.log.debug(2)
 
-            # Catch exception raised from passive frame
-            with test.assertRaises(ZeroDivisionError):
-                raise_immediately()
-            with test.assertRaises(ZeroDivisionError):
-                hold() | raise_immediately()
-            with test.assertRaises(ZeroDivisionError):
-                hold() & raise_immediately()
+            # Raise passive exception
+            # It will be caught by EventLoop.passive_frame_exception_handler
+            raise_immediately()
+            hold() | raise_immediately()
+            hold() & raise_immediately()
+            await sleep(0.1)
             test.log.debug(3)
 
             # Raise passive exception woken by event
@@ -558,10 +558,13 @@ class TestAsyncFrames(unittest.TestCase):
         test.assertLogEqual("""
             0.0: 1
             0.3: 2
-            0.3: 3
-            0.4: Passive frame exception caught: ZeroDivisionError()
-            0.4: Passive frame exception caught: ZeroDivisionError()
-            0.4: Passive frame exception caught: ZeroDivisionError()
+            0.3: Passive frame exception caught: ZeroDivisionError()
+            0.3: Passive frame exception caught: ZeroDivisionError()
+            0.3: Passive frame exception caught: ZeroDivisionError()
+            0.4: 3
+            0.5: Passive frame exception caught: ZeroDivisionError()
+            0.5: Passive frame exception caught: ZeroDivisionError()
+            0.5: Passive frame exception caught: ZeroDivisionError()
         """)
 
     def test_animate(self):
@@ -598,7 +601,7 @@ class TestAsyncFrames(unittest.TestCase):
         async def main():
             await wait(test, 0.1, 'main')
         @Frame
-        async def raise_exception():
+        def raise_exception():
             raise ZeroDivisionError
         test.loop.run(main)
         test.loop.run(main)
@@ -654,6 +657,36 @@ class TestAsyncFrames(unittest.TestCase):
             0.3: 4
         """)
 
+    def test_ready(self):
+        test = self
+        @Frame
+        async def case1():
+            test.log.debug('case1_1')
+        @Frame
+        async def case2():
+            test.log.debug('case2_1')
+            await hold()
+            test.log.debug('case2_2')
+        @Frame
+        async def case3():
+            test.log.debug('case3_1')
+            raise ZeroDivisionError()
+        @Frame
+        async def main():
+            await case1().ready
+            await case2().ready
+            c3 = case3()
+            with test.assertRaises(ZeroDivisionError):
+                await (c3.ready | c3)
+            test.assertFalse(c3.ready)
+
+        test.loop.run(main)
+        test.assertLogEqual("""
+            0.0: case1_1
+            0.0: case2_1
+            0.0: case3_1
+        """)
+
     def test_free(self):
         test = self
         @Frame
@@ -662,7 +695,8 @@ class TestAsyncFrames(unittest.TestCase):
             await sleep(0.1)
             sf.remove()
 
-            subframe()
+            sf = subframe()
+            await sf.ready
         @Frame
         async def subframe(self):
             test.log.debug('1')
@@ -675,6 +709,29 @@ class TestAsyncFrames(unittest.TestCase):
             0.1: 1
             0.1: 2
         """)
+
+    def test_startup_behaviour(self):
+        test=self
+        @Frame
+        async def frame():
+            sf = immediate_subframe()
+            test.assertEqual(sf.var, 'value')
+            await sf.ready
+            test.assertEqual(sf.var, 'value')
+
+            sf = delayed_subframe()
+            with test.assertRaises(AttributeError):
+                test.assertEqual(sf.var, 'value')
+            await sf.ready
+            test.assertEqual(sf.var, 'value')
+        @Frame(startup_behaviour=FrameStartupBehaviour.immediate)
+        async def immediate_subframe(self):
+            self.var = 'value'
+        @Frame(startup_behaviour=FrameStartupBehaviour.delayed)
+        async def delayed_subframe(self):
+            self.var = 'value'
+            await sleep()
+        test.loop.run(frame)
 
     def test_thread_independance(self):
         test = self

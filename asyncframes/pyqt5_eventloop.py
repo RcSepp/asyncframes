@@ -38,12 +38,12 @@ class EventLoop(asyncframes.AbstractEventLoop, QObject, metaclass=EventLoopMeta)
     def _stop(self):
         self.loop.exit()
 
-    def _post(self, event, delay):
-        QTimer.singleShot(1000 * delay, functools.partial(self.sendevent, event))
+    def _post(self, delay, callback, args):
+        QTimer.singleShot(1000 * delay, functools.partial(callback, *args))
     
-    def _invoke(self, event, delay):
-        self.metaObject().invokeMethod(self, "_invoke_slot", Qt.QueuedConnection, Q_ARG(asyncframes.Event, event), Q_ARG(float, delay))
+    def _invoke(self, delay, callback, args):
+        self.metaObject().invokeMethod(self, "_invoke_slot", Qt.QueuedConnection, Q_ARG(float, delay), Q_ARG(object, functools.partial(callback, *args)))
 
-    @pyqtSlot(asyncframes.Event, float)
-    def _invoke_slot(self, event, delay):
-        QTimer.singleShot(1000 * delay, functools.partial(self.sendevent, event))
+    @pyqtSlot(float, object)
+    def _invoke_slot(self, delay, callback):
+        QTimer.singleShot(1000 * delay, callback)

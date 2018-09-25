@@ -47,6 +47,74 @@ Frames can be removed in three ways:
 2. The frame's coroutine finishes (i.e. goes out of scope).
 3. A parent frame is removed.
 
+Coroutine startup behaviour
+---------------------------
+
+There are two opposing strategies to starting coroutines. Immediate strategy
+(IS), where calling a coroutine directly executes code until the first
+``await``, and delayed strategy (DS), where calling a coroutine queues its
+execution in the event loop. Using IS, coroutines act like single-threaded
+functions with the ability to suspend execution using ``await``. Using DS,
+coroutines act like multi-threaded functions, that are scheduled for delayed
+execution.
+
+In general, IS coroutines are easier to write, for the following reasons:
+
+1. Coroutines without ``await`` behave exactly like normal functions.
+2. Initialization code before the first ``await`` is guaranteed to run before
+execution is returned to the caller.
+
+To emphasize point 2, consider the following example: ::
+
+    from asyncframes import Frame, EventSource, sleep
+    from asyncframes.asyncio_eventloop import EventLoop
+
+    @Frame
+    async def timer(self, interval):
+        # Initialization code
+        self.tick = EventSource('timer.tick')
+
+        # Main code
+        while True:
+            await sleep(1)
+            self.tick.post(self)
+
+    @Frame
+    async def main_frame():
+        tmr = timer(1)
+        #await tmr.ready # Uncomment this line to successfully run this example
+                         # on asyncframes version 1.2 or above
+
+        for i in range(5):
+            await tmr.tick # Using DS, this line will throw "AttributeError:
+                           # 'Frame' object has no attribute 'tick'"
+            print(i + 1)
+
+    loop = EventLoop()
+    loop.run(main_frame)
+
+For these reasons, asyncframes uses IS until version 1.1. Starting version 1.2,
+asyncframes uses DS by default, with the option to enable IS by passing
+``startup_behaviour=FrameStartupBehaviour.immediate``.
+
+Here are the advantages of DS:
+
+1. Most existing coroutine libraries, e.g. asyncio, use DS.
+2. Multi-threaded or distributed frames can run entirely on the newly spawned
+   thread or process.
+
+Point 2 refers to frames that run on a separate thread (``PFrame``s) or on a
+separate process (``DFrame``s). To ensure such frames behave according to IS,
+either the initialization part of the frame has to be executed on the calling
+frame's thread or the calling frame's thread has to be suspended until the
+spawned frame is initialized. Both of these methods would defeat the purpose of
+multi-threading.
+To successfully run code like the *timer*-example above on asyncframes version
+1.2 or above, we introduced the Frame.ready event source. Frame.ready sends an
+event as soon as (a) the frame is awaited for the first time or (b) the frame
+is done (whichever comes first).
+
+
 
 Installation
 ============

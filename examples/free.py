@@ -27,6 +27,7 @@ async def progress_reporter(self):
 @Frame
 async def main_frame(self):
     pr = progress_reporter()
+    await pr.ready
     for progress in range(0, 100, 13):
         pr.progress.post(self, progress)
         if progress > 20:
