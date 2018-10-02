@@ -7,6 +7,7 @@ import io
 import logging
 import math
 import threading
+import queue
 import time
 import unittest
 from asyncframes import *
@@ -735,13 +736,22 @@ class TestAsyncFrames(unittest.TestCase):
 
     def test_thread_independance(self):
         test = self
+        errors = queue.Queue()
+        def test_thread(tc):
+            try:
+                test.__class__(tc).debug()
+            except Exception as err:
+                errors.put(err)
 
         testcases = unittest.defaultTestLoader.getTestCaseNames(test.__class__)
         testcases.remove('test_thread_independance')
 
-        threads = [threading.Thread(target=lambda tc: test.__class__(tc).debug(), args=(testcase,)) for testcase in testcases]
+        threads = [threading.Thread(target=test_thread, args=(testcase,)) for testcase in testcases]
         for thread in threads: thread.start()
         for thread in threads: thread.join()
+
+        if not errors.empty():
+            raise errors.get()
 
 class TestPyQt5EventLoop(TestAsyncFrames):
     def setUp(self):
@@ -763,6 +773,7 @@ class TestPyQt5EventLoop(TestAsyncFrames):
 
     def test_thread_independance(self):
         test = self
+        errors = queue.Queue()
         import PyQt5.Qt
         class TestThread(PyQt5.Qt.QThread):
             err = None
@@ -773,7 +784,7 @@ class TestPyQt5EventLoop(TestAsyncFrames):
                 try:
                     test.__class__(self.tc).debug()
                 except Exception as err:
-                    TestThread.err = err
+                    errors.put(err)
 
         testcases = unittest.defaultTestLoader.getTestCaseNames(test.__class__)
         testcases.remove('test_thread_independance')
@@ -782,8 +793,8 @@ class TestPyQt5EventLoop(TestAsyncFrames):
         for thread in threads: thread.start()
         for thread in threads: thread.wait()
 
-        if TestThread.err:
-            raise TestThread.err
+        if not errors.empty():
+            raise errors.get()
 
 if __name__ == "__main__":
     unittest.main()
