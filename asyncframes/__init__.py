@@ -43,8 +43,6 @@ class InvalidOperationException(Exception):
 class AbstractEventLoop(metaclass=abc.ABCMeta):
     """Abstract base class of event loops."""
 
-    _current = None
-
     @abc.abstractmethod
     def _run(self):
         raise NotImplementedError # pragma: no cover
@@ -70,6 +68,7 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         try:
             self.mainframe = frame(*frameargs, **framekwargs)
             if not self.mainframe.removed:
+                self.mainframe._listeners.add(self) # Listen to mainframe finished event
                 self._run()
         finally:
             self.mainframe = None
@@ -93,10 +92,6 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         finally:
             # Restore current frame
             _THREAD_LOCALS._current_frame = currentframe
-
-        if event.source == self.mainframe: # If the main frame finished
-            self._stop()
-            return False
 
         return True
 
@@ -123,6 +118,14 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         finally:
             # Restore current frame
             _THREAD_LOCALS._current_frame = currentframe
+
+    def process(self, sender, msg):
+        if isinstance(msg, Exception) and type(msg) != StopIteration and type(msg) != GeneratorExit:
+            raise msg
+
+        if sender == self.mainframe: # If mainframe finished, ...
+            sender._listeners.remove(self) # Stop monitoring mainframe
+            self._stop() # Stop event loop
 
 
 class Awaitable(collections.abc.Awaitable):
@@ -199,15 +202,13 @@ class Awaitable(collections.abc.Awaitable):
 
         _THREAD_LOCALS._current_frame = self # Activate self
         try:
-            msg = self.step(sender, msg)
-        except (StopIteration, GeneratorExit) as err:
-            msg = err # Forward exception to listeners
-        except Exception as err:
-            if not self._listeners: raise
-            msg = err # Forward exception to listeners
-        if self._listeners:
-            for listener in self._listeners.copy():
-                listener.process(self, msg)
+            self.step(sender, msg)
+        except BaseException as msg:
+            if self._listeners:
+                for listener in self._listeners.copy():
+                    listener.process(self, msg)
+            elif type(msg) != StopIteration and type(msg) != GeneratorExit:
+                raise
 
     def __and__(self, other):
         """Register A & B as shortcut for all_(A, B)
@@ -619,7 +620,9 @@ class Frame(Awaitable):
         """
 
         if self.removed:
-            raise GeneratorExit
+            stop = StopIteration()
+            stop.value = self._result
+            raise stop
 
         if self._generator is not None:
             try:
