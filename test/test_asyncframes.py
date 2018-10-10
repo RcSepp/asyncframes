@@ -13,6 +13,12 @@ import unittest
 from asyncframes import *
 from asyncframes import _THREAD_LOCALS
 
+# Uncomment the following line to run all tests using PFrames
+# Frame = PFrame
+
+# NUM_ITERATIONS controls the number of times each test is executed
+NUM_ITERATIONS = 1
+
 class MyFrame(Frame):
     @staticmethod
     def mystaticmethod(test):
@@ -45,16 +51,16 @@ class TestAsyncFrames(unittest.TestCase):
         # Check if the event loop class implements AbstractEventLoop._invoke
         self.supports_invoke = self.loop.__class__._invoke != AbstractEventLoop._invoke
 
-        # Register event handler for exceptions raised within passive frames
-        def passive_frame_exception_handler(err):
+        # Register event handler for exceptions raised within frames
+        def frame_exception_handler(err):
             if isinstance(err, AssertionError):
                 raise err # Raise unittest assertions
-            self.log.debug("Passive frame exception caught: " + repr(err))
-        self.loop.passive_frame_exception_handler = passive_frame_exception_handler
+            self.log.debug("Frame exception caught: " + repr(err))
+        self.loop.frame_exception_handler = frame_exception_handler
 
         # Create logger for debugging program flow using time stamped log messages
         # Create time stamped log messages using self.log.debug(...)
-        # Test program flow using self.assertLogEqual(...)
+        # Test program flow by passing an expected_log to self.run_frame()
         self.log = logging.getLogger(self._testMethodName + str(threading.get_ident()))
         self.log.setLevel(logging.DEBUG)
         self.logstream = io.StringIO()
@@ -68,21 +74,33 @@ class TestAsyncFrames(unittest.TestCase):
                 t = (datetime.datetime.now() - self.starttime).total_seconds()
                 msg = super().format(record)
                 return str(math.floor(t * 10) / 10) + ": " + msg if msg else str(math.floor(t * 10) / 10)
-        loghandler.setFormatter(TimedFormatter("%(message)s"))
+        self.logformatter = TimedFormatter("%(message)s")
+        loghandler.setFormatter(self.logformatter)
         self.log.addHandler(loghandler)
 
-    def assertLogEqual(self, expected):
-        expected = '\n'.join(line.strip() for line in expected.strip('\n').split('\n')) # Remove leading and trailing empty lines and white space
-        self.assertEqual(expected, self.logstream.getvalue())
+    def run_frame(self, frame, *frameargs, expected_log=None):
+        @Frame
+        async def mainframe():
+            self.logstream.truncate(0) # Reset log
+            self.logstream.seek(0) # Reset log
+            self.logformatter.starttime = datetime.datetime.now() # Reset log start time
+            await frame(*frameargs)
+        for i in range(NUM_ITERATIONS):
+            self.loop.run(mainframe)
+            self.log.debug('done')
+            if expected_log is not None:
+                # Compare log with expected_log
+                expected = '\n'.join(line.strip() for line in expected_log.strip('\n').split('\n')) # Remove leading and trailing empty lines and white space
+                self.assertEqual(expected, self.logstream.getvalue())
 
     def test_simple(self):
         test = self
         @Frame
         async def main():
             await wait(test, 0.1, '1')
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.1: 1
+            0.1: done
         """)
 
     def test_regular_function_mainframe(self):
@@ -94,9 +112,7 @@ class TestAsyncFrames(unittest.TestCase):
         @Frame
         def main(self):
             remove_after(self, 0.1)
-        test.loop.run(main)
-        test.log.debug('done')
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.1: done
         """)
 
@@ -105,9 +121,7 @@ class TestAsyncFrames(unittest.TestCase):
         @MyFrame
         async def main():
             await sleep(-1)
-            test.log.debug('done')
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.0: done
         """)
 
@@ -117,10 +131,10 @@ class TestAsyncFrames(unittest.TestCase):
         async def main():
             wait(test, 0.1, '1')
             await wait(test, 0.2, '2')
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.1: 1
             0.2: 2
+            0.2: done
         """)
 
     def test_await_order_2(self):
@@ -129,10 +143,10 @@ class TestAsyncFrames(unittest.TestCase):
         async def main():
             await wait(test, 0.1, '1')
             await wait(test, 0.2, '2')
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.1: 1
             0.3: 2
+            0.3: done
         """)
 
     def test_await_order_3(self):
@@ -141,9 +155,9 @@ class TestAsyncFrames(unittest.TestCase):
         async def main():
             await wait(test, 0.1, '1')
             wait(test, 0.2, '2')
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.1: 1
+            0.1: done
         """)
 
     def test_await_order_4(self):
@@ -152,8 +166,8 @@ class TestAsyncFrames(unittest.TestCase):
         async def main():
             wait(test, 0.1, '1')
             wait(test, 0.2, '2')
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
+            0.0: done
         """)
 
     def test_await_order_5(self):
@@ -163,10 +177,10 @@ class TestAsyncFrames(unittest.TestCase):
             w1 = wait(test, 0.1, '1')
             w2 = wait(test, 0.2, '2')
             await (w1 & w2)
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.1: 1
             0.2: 2
+            0.2: done
         """)
 
     def test_await_order_6(self):
@@ -176,9 +190,9 @@ class TestAsyncFrames(unittest.TestCase):
             w1 = wait(test, 0.1, '1')
             w2 = wait(test, 0.2, '2')
             await (w1 | w2)
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.1: 1
+            0.1: done
         """)
 
     def test_frame_result(self):
@@ -186,10 +200,10 @@ class TestAsyncFrames(unittest.TestCase):
         @MyFrame
         async def main():
             test.log.debug(await wait(test, 0.1, '1'))
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.1: 1
             0.1: some result
+            0.1: done
         """)
     
     def test_blocking_sleep(self):
@@ -197,9 +211,9 @@ class TestAsyncFrames(unittest.TestCase):
         @MyFrame
         async def main():
             test.log.debug((await sleep(0.1)).args)
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.1: None
+            0.1: done
         """)
     
     def test_non_blocking_sleep(self):
@@ -207,9 +221,9 @@ class TestAsyncFrames(unittest.TestCase):
         @MyFrame
         async def main():
             test.log.debug((await sleep(0)).args)
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.0: None
+            0.0: done
         """)
 
     def test_staticmethod(self):
@@ -217,9 +231,9 @@ class TestAsyncFrames(unittest.TestCase):
         @MyFrame
         async def main():
             MyFrame.mystaticmethod(test)
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.0: static method called
+            0.0: done
         """)
 
     def test_classvar(self):
@@ -227,9 +241,9 @@ class TestAsyncFrames(unittest.TestCase):
         @MyFrame
         async def main():
             test.log.debug(MyFrame.classvar)
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.0: class variable
+            0.0: done
         """)
 
     def test_primitive(self):
@@ -246,24 +260,24 @@ class TestAsyncFrames(unittest.TestCase):
         @MyFrame
         async def f1():
             MyPrimitive()
-        test.loop.run(f1)
+        test.run_frame(f1)
 
         @MyFrame2
         async def f2():
-            with test.assertRaises(InvalidOperationException):
-                MyPrimitive()
-        test.loop.run(f2)
+            MyPrimitive()
+        with test.assertRaises(InvalidOperationException):
+            test.run_frame(f2)
 
         @MyFrame
         async def f3():
-            f2()
-        test.loop.run(f3)
+            await f2()
+        test.run_frame(f3)
 
         @MyFrame
         async def f4():
             with test.assertRaises(TypeError):
                 MyPrimitive2()
-        test.loop.run(f4)
+        test.run_frame(f4)
 
         with test.assertRaises(InvalidOperationException):
             MyPrimitive()
@@ -278,17 +292,17 @@ class TestAsyncFrames(unittest.TestCase):
         @MyFrame2('param_value', kwparam='kwparam_value')
         async def main():
             pass
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.0: param=param_value
             0.0: kwparam=kwparam_value
+            0.0: done
         """)
 
     def test_Frame_current(self):
         test = self
-        test.subframe_counter = 0
         @MyFrame
         async def frame(self):
+            test.subframe_counter = 0
             test.assertEqual(_THREAD_LOCALS._current_frame, self)
             async_subframe() # Test passive async frame
             test.assertEqual(_THREAD_LOCALS._current_frame, self)
@@ -313,27 +327,29 @@ class TestAsyncFrames(unittest.TestCase):
         def subframe(self):
             test.assertEqual(_THREAD_LOCALS._current_frame, self)
             test.subframe_counter += 1
-        test.loop.run(frame)
+        test.run_frame(frame)
         test.assertEqual(test.subframe_counter, 4)
 
     def test_remove_self(self):
         test = self
-        @Frame
-        def frame(self):
-            test.log.debug("1")
-            self.remove()
-            test.log.debug("2") # Frame.remove() doesn't interrupt regular frame functions
+        # @Frame
+        # def frame(self):
+        #     test.log.debug("1")
+        #     self.remove()
+        #     test.log.debug("2") # Frame.remove() doesn't interrupt regular frame functions
+        # test.run_frame(frame, expected_log="""
+        #     0.0: 1
+        #     0.0: 2
+        #     0.0: done
+        # """)
         @Frame
         async def async_frame(self):
             test.log.debug("3")
             self.remove()
             test.log.debug("never reached") # Frame.remove() interrupts async frame functions
-        test.loop.run(frame)
-        test.loop.run(async_frame)
-        test.assertLogEqual("""
-            0.0: 1
-            0.0: 2
+        test.run_frame(async_frame, expected_log="""
             0.0: 3
+            0.0: done
         """)
 
     def test_reremove(self):
@@ -376,9 +392,7 @@ class TestAsyncFrames(unittest.TestCase):
 
             test.log.debug('Re-removing frame')
             test.assertEqual(self.remove(), False)
-        test.loop.run(main)
-        test.log.debug('done')
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.0: Removing primitive
             0.1: Re-removing any_
             0.3: Removing frame
@@ -398,38 +412,38 @@ class TestAsyncFrames(unittest.TestCase):
         async def main1(self):
             w = wait(test, 0.1, '1')
             await (w & w)
-        test.loop.run(main1)
+        test.run_frame(main1)
         @Frame
         async def main2(self):
             w = wait(test, 0.1, '2')
             await (w | w)
-        test.loop.run(main2)
+        test.run_frame(main2)
         @Frame
         async def main3(self):
             w = sleep(0.1)
             a1 = waitfor(w)
             a2 = waitfor(w)
             await (a1 & a2)
-        test.loop.run(main3)
+        test.run_frame(main3)
         @Frame
         async def main4(self):
             w = wait(test, 0.1, '3')
             a1 = waitfor(w)
             a2 = waitfor(w)
             await (a1 & a2)
-        test.loop.run(main4)
+        test.run_frame(main4)
         @Frame
         async def main5(self):
             w = wait(test, 0.1, '4')
             a1 = waitfor(w)
             a2 = waitfor(w)
             await (a1 | a2)
-        test.loop.run(main5)
+        test.run_frame(main5)
         @Frame
         async def main6(self):
             s = sleep(0.1)
             await (s | s & s)
-        test.loop.run(main6)
+        test.run_frame(main6)
 
     def test_finished_before_await(self):
         test = self
@@ -445,9 +459,7 @@ class TestAsyncFrames(unittest.TestCase):
             for k in sorted(s_and_w):
                 v = s_and_w[k]
                 test.log.debug("{}: {}".format(k, v))
-            test.log.debug('done')
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.1: 1
             0.2: sleep(0.2)
             0.2: sleep(0.1)
@@ -502,18 +514,19 @@ class TestAsyncFrames(unittest.TestCase):
             time.sleep(seconds)
             awaitable_event.invoke('invoke_event', 'my event args')
 
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.1: 'send_event' raised 'my event' with args 'my event args'
             0.2: 'send_event' reraised 'my event' with args 'my event args'
             0.3: 'post_event' raised 'my event' with args 'my event args'
             0.4: 'main' reraised 'my event' with args 'my event args'
             0.5: 'invoke_event' raised 'my event' with args 'my event args'
             0.6: 'main' reraised 'my event' with args 'my event args'
+            0.6: done
         """)
 
     def test_exceptions(self):
         test = self
+        test.maxDiff = None
         @Frame
         async def main():
             # Catch exception raised from active frame
@@ -535,7 +548,7 @@ class TestAsyncFrames(unittest.TestCase):
             test.log.debug(2)
 
             # Raise passive exception
-            # It will be caught by EventLoop.passive_frame_exception_handler
+            # It will be caught by EventLoop.frame_exception_handler
             raise_immediately()
             hold() | raise_immediately()
             hold() & raise_immediately()
@@ -543,7 +556,7 @@ class TestAsyncFrames(unittest.TestCase):
             test.log.debug(3)
 
             # Raise passive exception woken by event
-            # It will be caught by EventLoop.passive_frame_exception_handler
+            # It will be caught by EventLoop.frame_exception_handler
             raise_delayed()
             hold() | raise_delayed()
             hold() & raise_delayed()
@@ -555,17 +568,23 @@ class TestAsyncFrames(unittest.TestCase):
         async def raise_delayed():
             await sleep(0.1)
             raise ZeroDivisionError()
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
+            0.0: Frame exception caught: ZeroDivisionError()
+            0.0: Frame exception caught: ZeroDivisionError()
+            0.0: Frame exception caught: ZeroDivisionError()
             0.0: 1
+            0.1: Frame exception caught: ZeroDivisionError()
+            0.2: Frame exception caught: ZeroDivisionError()
+            0.3: Frame exception caught: ZeroDivisionError()
             0.3: 2
-            0.3: Passive frame exception caught: ZeroDivisionError()
-            0.3: Passive frame exception caught: ZeroDivisionError()
-            0.3: Passive frame exception caught: ZeroDivisionError()
+            0.3: Frame exception caught: ZeroDivisionError()
+            0.3: Frame exception caught: ZeroDivisionError()
+            0.3: Frame exception caught: ZeroDivisionError()
             0.4: 3
-            0.5: Passive frame exception caught: ZeroDivisionError()
-            0.5: Passive frame exception caught: ZeroDivisionError()
-            0.5: Passive frame exception caught: ZeroDivisionError()
+            0.5: Frame exception caught: ZeroDivisionError()
+            0.5: Frame exception caught: ZeroDivisionError()
+            0.5: Frame exception caught: ZeroDivisionError()
+            0.6: done
         """)
 
     def test_animate(self):
@@ -576,11 +595,11 @@ class TestAsyncFrames(unittest.TestCase):
         @Frame
         async def main():
             await a()
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.1
             0.2
             0.2
+            0.2: done
         """)
 
     def test_unfinished_await(self):
@@ -594,7 +613,7 @@ class TestAsyncFrames(unittest.TestCase):
         async def subframe():
             await sleep()
             await sleep()
-        test.loop.run(frame)
+        test.run_frame(frame)
 
     def test_rerun(self):
         test = self
@@ -604,15 +623,19 @@ class TestAsyncFrames(unittest.TestCase):
         @Frame
         def raise_exception():
             raise ZeroDivisionError
-        test.loop.run(main)
-        test.loop.run(main)
-        with test.assertRaises(ZeroDivisionError):
-            test.loop.run(raise_exception)
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.1: main
-            0.2: main
-            0.3: main
+            0.1: done
+        """)
+        test.run_frame(main, expected_log="""
+            0.1: main
+            0.1: done
+        """)
+        with test.assertRaises(ZeroDivisionError):
+            test.run_frame(raise_exception)
+        test.run_frame(main, expected_log="""
+            0.1: main
+            0.1: done
         """)
 
     def test_meta(self):
@@ -621,15 +644,17 @@ class TestAsyncFrames(unittest.TestCase):
         async def main(self):
             test.assertEqual(str(self), "main")
             test.assertRegex(repr(self), r"<asyncframes.main object at 0x\w*>")
-        test.loop.run(main)
+        test.run_frame(main)
 
     def test_invalid_usage(self):
         test = self
         @Frame
         def raise_already_running():
-            test.loop.run(wait, test, 0.0, '')
+            test.run_frame(wait, test, 0.0, '')
         with test.assertRaisesRegex(InvalidOperationException, "Another event loop is already running"):
-            test.loop.run(raise_already_running)
+            test.run_frame(raise_already_running, expected_log="""
+                0.0: done
+            """)
         with test.assertRaisesRegex(InvalidOperationException, "Can't call frame without a running event loop"):
             wait(test, 0.0, '')
 
@@ -650,12 +675,12 @@ class TestAsyncFrames(unittest.TestCase):
             await s2
             await s3
             test.log.debug('4')
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.1: 1
             0.2: 2
             0.3: 3
             0.3: 4
+            0.3: done
         """)
 
     def test_ready(self):
@@ -681,11 +706,12 @@ class TestAsyncFrames(unittest.TestCase):
                 await (c3.ready | c3)
             test.assertFalse(c3.ready)
 
-        test.loop.run(main)
-        test.assertLogEqual("""
+        test.run_frame(main, expected_log="""
             0.0: case1_1
             0.0: case2_1
             0.0: case3_1
+            0.0: Frame exception caught: ZeroDivisionError()
+            0.0: done
         """)
 
     def test_free(self):
@@ -703,16 +729,47 @@ class TestAsyncFrames(unittest.TestCase):
             test.log.debug('1')
             await self.free
             test.log.debug('2')
-        test.loop.run(frame)
-        test.assertLogEqual("""
+        test.run_frame(frame, expected_log="""
             0.0: 1
             0.1: 2
             0.1: 1
             0.1: 2
+            0.1: done
         """)
 
+    def test_delayed_await(self):
+        test = self
+        @Frame
+        async def main():
+            f = raise_exception()
+            await sleep(0.1)
+            with test.assertRaises(ZeroDivisionError):
+                await f
+            test.log.debug('after exception')
+        @Frame
+        async def raise_exception():
+            raise ZeroDivisionError
+        test.run_frame(main, expected_log="""
+            0.0: Frame exception caught: ZeroDivisionError()
+            0.1: after exception
+            0.1: done
+        """)
+
+        test = self
+        @Frame
+        async def main():
+            f = raise_exception()
+            await sleep(0.1)
+            await f
+            test.log.debug('after exception')
+        @Frame
+        async def raise_exception():
+            raise ZeroDivisionError
+        with test.assertRaises(ZeroDivisionError):
+            test.run_frame(main)
+
     def test_startup_behaviour(self):
-        test=self
+        test = self
         @Frame
         async def frame():
             sf = immediate_subframe()
@@ -730,9 +787,10 @@ class TestAsyncFrames(unittest.TestCase):
             self.var = 'value'
         @Frame(startup_behaviour=FrameStartupBehaviour.delayed)
         async def delayed_subframe(self):
+            time.sleep(0.1)
             self.var = 'value'
             await sleep()
-        test.loop.run(frame)
+        test.run_frame(frame)
 
     def test_thread_independance(self):
         test = self
@@ -740,6 +798,8 @@ class TestAsyncFrames(unittest.TestCase):
         def test_thread(tc):
             try:
                 test.__class__(tc).debug()
+            except unittest.SkipTest:
+                pass
             except Exception as err:
                 errors.put(err)
 
@@ -747,11 +807,19 @@ class TestAsyncFrames(unittest.TestCase):
         testcases.remove('test_thread_independance')
 
         threads = [threading.Thread(target=test_thread, args=(testcase,)) for testcase in testcases]
-        for thread in threads: thread.start()
-        for thread in threads: thread.join()
+        for thread in threads:
+            thread.daemon = True
+            thread.start()
+            time.sleep(0.1) # Delay test starts to reduce the effect of startup latency on code timings
+        endtime = datetime.datetime.now() + datetime.timedelta(seconds=5) # Limit processing time to 5 seconds
+        for thread in threads: thread.join(max(0, (endtime - datetime.datetime.now()).total_seconds()))
+
+        for i, thread in enumerate(threads):
+            if thread.is_alive():
+                print(testcases[i] + " did not finish")
 
         if not errors.empty():
-            raise errors.get()
+            raise Exception(str(errors.qsize()) + " test cases failed") from errors.get()
 
 class TestPyQt5EventLoop(TestAsyncFrames):
     def setUp(self):
@@ -783,6 +851,8 @@ class TestPyQt5EventLoop(TestAsyncFrames):
             def run(self):
                 try:
                     test.__class__(self.tc).debug()
+                except unittest.SkipTest:
+                    pass
                 except Exception as err:
                     errors.put(err)
 
@@ -790,11 +860,13 @@ class TestPyQt5EventLoop(TestAsyncFrames):
         testcases.remove('test_thread_independance')
 
         threads = [TestThread(testcase) for testcase in testcases]
-        for thread in threads: thread.start()
+        for thread in threads:
+            thread.start()
+            time.sleep(0.1) # Delay test starts to reduce the effect of startup latency on code timings
         for thread in threads: thread.wait()
 
         if not errors.empty():
-            raise errors.get()
+            raise Exception(str(errors.qsize()) + " test cases failed") from errors.get()
 
 if __name__ == "__main__":
     unittest.main()
