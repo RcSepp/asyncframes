@@ -20,14 +20,19 @@ class EventLoop(asyncframes.AbstractEventLoop):
     def _stop(self):
         self.loop.stop()
 
+    def _close(self):
+        self.loop.close()
+
     def _post(self, delay, callback, args):
-        if delay <= 0:
-            self.loop.call_soon(callback, *args)
-        else:
-            self.loop.call_later(delay, callback, *args)
+        if not self.loop.is_closed():
+            if delay <= 0:
+                self.loop.call_soon(callback, *args)
+            else:
+                self.loop.call_later(delay, callback, *args)
 
     def _invoke(self, delay, callback, args):
-        if delay <= 0:
-            self.loop.call_soon_threadsafe(callback, *args)
-        else:
-            self.loop.call_soon_threadsafe(self.loop.call_later, delay, callback, *args)
+        if not self.loop.is_closed():
+            if delay <= 0:
+                self.loop.call_soon_threadsafe(callback, *args)
+            else:
+                self.loop.call_soon_threadsafe(self.loop.call_later, delay, callback, *args)

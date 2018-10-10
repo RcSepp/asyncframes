@@ -10,12 +10,15 @@ import inspect
 import logging
 import sys
 import threading
+import os
+import queue
+import warnings
 
 
 __all__ = [
     'all_', 'animate', 'any_', 'Awaitable', 'Event', 'AbstractEventLoop',
     'EventSource', 'Frame', 'FrameStartupBehaviour', 'InvalidOperationException',
-    'hold', 'Primitive', 'sleep'
+    'hold', 'PFrame', 'Primitive', 'sleep'
 ]
 __version__ = '1.1.0'
 
@@ -50,59 +53,124 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
     def _stop(self):
         raise NotImplementedError # pragma: no cover
     @abc.abstractmethod
+    def _close(self):
+        raise NotImplementedError # pragma: no cover
+    @abc.abstractmethod
     def _post(self, delay, callback, args):
         raise NotImplementedError # pragma: no cover
     def _invoke(self, delay, callback, args):
         logging.warning("Thread-safe event posting not available for this event loop. Falling back to non-thread-safe event posting") # pragma: no cover
         self._post(delay, callback, args) # pragma: no cover
+    def _spawnthread(self, target, args):
+        thread = threading.Thread(target=target, args=args)
+        thread.daemon = True
+        thread.start()
+        return thread
+    def _jointhread(self, thread):
+        thread.join()
 
     def __init__(self):
-        self.mainframe = None
-        self.passive_frame_exception_handler = None
+        self.frame_exception_handler = None
+        self._idle = True
+        self._eventloop_affinity = self
+        self._result = None
 
     def run(self, frame, *frameargs, **framekwargs):
         if _THREAD_LOCALS._current_eventloop is not None:
             raise InvalidOperationException("Another event loop is already running")
         _THREAD_LOCALS._current_eventloop = self
 
+        eventloop_queue = queue.Queue()
+        self.event_queue = queue.Queue()
+        def worker_thread(parent_eventloop):
+            eventloop = parent_eventloop.__class__()
+            _THREAD_LOCALS._current_eventloop = eventloop
+            eventloop_queue.put(eventloop)
+            eventloop.event_queue = parent_eventloop.event_queue
+            eventloop._run()
+            eventloop._close()
+        num_workers = len(os.sched_getaffinity(0)) - 1
+        workers = [self._spawnthread(target=worker_thread, args=(self,)) for i in range(num_workers)]
+
+        # Collect an array of all eventloops and distribute that array among all eventloops
+        self.eventloops = [self]
+        for worker in workers: self.eventloops.append(eventloop_queue.get())
+        for eventloop in self.eventloops[1:]: eventloop.eventloops = self.eventloops
+
+        self._idle = False
+
         try:
-            self.mainframe = frame(*frameargs, **framekwargs)
-            if not self.mainframe.removed:
-                self.mainframe._listeners.add(self) # Listen to mainframe finished event
+            mainframe = frame(*frameargs, **framekwargs)
+            if not mainframe.removed:
+                mainframe._listeners.add(self) # Listen to mainframe finished event
                 self._run()
         finally:
-            self.mainframe = None
             _THREAD_LOCALS._current_eventloop = None
             _THREAD_LOCALS._current_frame = None
+            self._idle = True
+
+            while True:
+                try:
+                    self.event_queue.get(False)
+                except queue.Empty:
+                    break
+            for eventloop in self.eventloops[1:]: eventloop._invoke(0, eventloop._stop, ())
+            for worker in workers: self._jointhread(worker)
+
+            if isinstance(self._result, Exception):
+                raise self._result
+            else:
+                return self._result
+
+    def _enqueue(self, delay, callback, args, eventloop_affinity=None):
+        if eventloop_affinity: # If a target eventloop was provided
+            if eventloop_affinity == self:
+                eventloop_affinity._post(delay, callback, (eventloop_affinity, ) + args)
+            else:
+                eventloop_affinity._invoke(delay, callback, (eventloop_affinity, ) + args)
+        else: # If no target eventloop was provided
+            if delay > 0.0:
+                # Call _enqueue again with 0 delay after 'delay' seconds
+                self.eventloops[-1]._invoke(delay, self._enqueue, (0.0, callback, args)) #TODO: Consider running a dedicated event loop for delays
+            else: # If delay == 0, ...
+                # Place the callback on the event queue
+                self.event_queue.put((callback, args))
+
+                # Wake up an idle event (if any)
+                for eventloop in self.eventloops:
+                    if eventloop._idle:
+                        eventloop._idle = False
+                        eventloop._invoke(0, eventloop._dequeue, ())
+                        break
+
+    def _dequeue(self):
+        try:
+            callback, args = self.event_queue.get_nowait()
+        except queue.Empty:
+            self._idle = True
+        else:
+            callback(self, *args)
+            if not self.event_queue.empty():
+                self._post(0, self._dequeue, ())
+            else:
+                self._idle = True
 
     def sendevent(self, event):
-        # Discard events sent after the event loop has been closed
-        if self != _THREAD_LOCALS._current_eventloop: return
-
         # Save current frame, since it will be modified inside Awaitable.process()
         currentframe = _THREAD_LOCALS._current_frame
 
         try:
             event.source.process(event.source, event)
-        except Exception as err:
-            if self.passive_frame_exception_handler:
-                self.passive_frame_exception_handler(err)
-            else:
-                raise # pragma: no cover
         finally:
             # Restore current frame
             _THREAD_LOCALS._current_frame = currentframe
 
-        return True
-
     def postevent(self, event, delay=0):
-        # Discard events sent after the event loop has been closed
-        if self != _THREAD_LOCALS._current_eventloop: return
-
-        self._post(delay, self.sendevent, (event,))
+        self._enqueue(delay, AbstractEventLoop.sendevent, (event, ), event.source._eventloop_affinity)
 
     def invokeevent(self, event, delay=0):
-        self._invoke(delay, self.sendevent, (event,))
+        warnings.warn("Invoking events is deprecated. Use post* functions instead.", category=DeprecationWarning, stacklevel=2)
+        self._enqueue(delay, AbstractEventLoop.sendevent, (event, ), event.source._eventloop_affinity)
 
     def _start_coroutine(self, frame):
         # Save current frame, since it will be modified inside Awaitable.process()
@@ -110,19 +178,19 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
 
         try:
             frame.process(None, None)
-        except Exception as err:
-            if self.passive_frame_exception_handler:
-                self.passive_frame_exception_handler(err)
-            else:
-                raise # pragma: no cover
         finally:
             # Restore current frame
             _THREAD_LOCALS._current_frame = currentframe
 
     def process(self, sender, msg):
-        if sender == self.mainframe: # If mainframe finished, ...
-            sender._listeners.remove(self) # Stop monitoring mainframe
-            self._stop() # Stop event loop
+        if type(msg) == StopIteration: self._result = msg.value
+        elif type(msg) == GeneratorExit: self._result = None
+        else: self._result = msg
+
+        self._stop() # Stop event loop
+
+def get_current_eventloop_index():
+    return _THREAD_LOCALS._current_eventloop.eventloops.index(_THREAD_LOCALS._current_eventloop)
 
 
 class Awaitable(collections.abc.Awaitable):
@@ -142,6 +210,7 @@ class Awaitable(collections.abc.Awaitable):
         self._removed = False
         self._result = None
         self._listeners = set()
+        self._eventloop_affinity = None
 
     def remove(self):
         """Remove this awaitable from the frame hierarchy.
@@ -174,16 +243,20 @@ class Awaitable(collections.abc.Awaitable):
 
     def __await__(self):
         if self.removed: # If this awaitable already finished
-            return self._result
+            if isinstance(self._result, Exception):
+                raise self._result
+            else:
+                return self._result
         try:
             while True:
                 msg = yield self
                 if isinstance(msg, BaseException):
                     raise msg
         except (StopIteration, GeneratorExit):
-            return self._result
-        finally:
-            self._listeners.clear()
+            if isinstance(self._result, Exception):
+                raise self._result
+            else:
+                return self._result
 
     @abc.abstractmethod
     def step(self, sender, msg):
@@ -200,12 +273,32 @@ class Awaitable(collections.abc.Awaitable):
         _THREAD_LOCALS._current_frame = self # Activate self
         try:
             self.step(sender, msg)
-        except BaseException as msg:
+        except BaseException as err:
+            # Store result
+            if type(err) == StopIteration:
+                self._result = err.value
+            elif type(err) != GeneratorExit:
+                self._result = err
+
+                # Call exception handler
+                if err != msg and _THREAD_LOCALS._current_eventloop.eventloops[0].frame_exception_handler:
+                    _THREAD_LOCALS._current_eventloop.eventloops[0].frame_exception_handler(err)
+
+            # Remove awaitable
+            if hasattr(self, '_remove'):
+                self._remove()
+            else:
+                self.remove()
+
+            # Propagate to listeners
             if self._listeners:
-                for listener in self._listeners.copy():
-                    listener.process(self, msg)
-            elif type(msg) != StopIteration and type(msg) != GeneratorExit:
-                raise
+                listeners = self._listeners
+                self._listeners = set()
+                for listener in listeners:
+                    if listener._eventloop_affinity is None or listener._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
+                        listener.process(self, err)
+                    else:
+                        listener._eventloop_affinity._invoke(0, listener.process, (self, err))
 
     def __and__(self, other):
         """Register A & B as shortcut for all_(A, B)
@@ -273,8 +366,6 @@ class EventSource(Awaitable):
             StopIteration: If the incoming event should wake up awaiting frames, raise a StopIteration with `value` set to the event
         """
 
-        self._result = msg
-        self.remove()
         stop = StopIteration()
         stop.value = msg
         raise stop
@@ -309,6 +400,7 @@ class EventSource(Awaitable):
             delay (float, optional): Defaults to 0. The time in seconds to wait before invoking the event
         """
 
+        warnings.warn("Invoking events is deprecated. Use post* functions instead.", category=DeprecationWarning, stacklevel=2)
         self.eventloop.invokeevent(Event(sender, self, args), delay)
 
 class Event():
@@ -342,7 +434,12 @@ class all_(Awaitable):
         self._result = {}
         for awaitable in awaitables:
             if awaitable.removed:
-                self._result[awaitable] = awaitable._result
+                if isinstance(awaitable._result, Exception):
+                    self._result = awaitable._result
+                    super().remove()
+                    return
+                else:
+                    self._result[awaitable] = awaitable._result
             else:
                 self._awaitables.add(awaitable)
                 awaitable._listeners.add(self)
@@ -368,15 +465,13 @@ class all_(Awaitable):
         """
 
         if isinstance(msg, BaseException):
-            self._awaitables.remove(sender)
-            sender._listeners.remove(self)
+            self._awaitables.discard(sender)
             if type(msg) == StopIteration:
                 self._result[sender] = msg.value
             elif type(msg) != GeneratorExit:
                 raise msg
 
         if not self._awaitables:
-            self.remove()
             stop = StopIteration()
             stop.value = self._result
             raise stop
@@ -391,7 +486,7 @@ class all_(Awaitable):
         if not super().remove():
             return False
         for awaitable in self._awaitables:
-            awaitable._listeners.remove(self)
+            awaitable._listeners.discard(self)
         self._awaitables.clear()
         if self._parent:
             self._parent._children.remove(self)
@@ -434,9 +529,6 @@ class any_(Awaitable):
         """
 
         if isinstance(msg, BaseException):
-            if type(msg) == StopIteration:
-                self._result = msg.value
-            self.remove()
             raise msg
 
     def remove(self):
@@ -449,7 +541,7 @@ class any_(Awaitable):
         if not super().remove():
             return False
         for awaitable in self._awaitables:
-            awaitable._listeners.remove(self)
+            awaitable._listeners.discard(self)
         self._awaitables.clear()
         if self._parent:
             self._parent._children.remove(self)
@@ -512,8 +604,6 @@ class animate(EventSource):
 
         if t >= self.seconds or self._final_event:
             self.callback(1.0)
-            self._result = msg
-            self.remove()
             stop = StopIteration()
             stop.value = msg
             raise stop
@@ -567,6 +657,8 @@ class Frame(Awaitable):
         self._generator = None
         self.ready = EventSource(str(self.__name__) + ".ready", True)
         self.free = EventSource(str(self.__name__) + ".free", True)
+        self._eventloop_affinity = _THREAD_LOCALS._current_eventloop
+        self.remove_lock = threading.Lock()
 
     def create(self, framefunc, *frameargs, **framekwargs):
         """Start the frame function with the given arguments.
@@ -589,7 +681,7 @@ class Frame(Awaitable):
             if inspect.isawaitable(self._generator): # If framefunc is a coroutine
                 if self.startup_behaviour == FrameStartupBehaviour.delayed:
                     # Post coroutine to the event queue
-                    _THREAD_LOCALS._current_eventloop._post(0.0, _THREAD_LOCALS._current_eventloop._start_coroutine, (self,))
+                    _THREAD_LOCALS._current_eventloop._enqueue(0.0, AbstractEventLoop._start_coroutine, (self, ), self._eventloop_affinity)
                 elif self.startup_behaviour == FrameStartupBehaviour.immediate:
                     # Start coroutine
                     try:
@@ -599,6 +691,8 @@ class Frame(Awaitable):
                     finally:
                         # Activate parent
                         _THREAD_LOCALS._current_frame = self._parent
+                else:
+                    raise ValueError('startup_behaviour must be FrameStartupBehaviour.delayed or FrameStartupBehaviour.immediate')
 
             # Activate parent
             _THREAD_LOCALS._current_frame = self._parent
@@ -624,29 +718,25 @@ class Frame(Awaitable):
         if self._generator is not None:
             try:
                 awaitable = self._generator.send(msg) # Continue coroutine
-            except StopIteration as stop: # If frame finished with result
-                self._result = stop.value # Set frame result to stop.value
+            except (StopIteration, GeneratorExit): # If frame finished
                 if msg is None: self.ready.send(self) # Send ready event after coroutine ran once
-                self.remove() # Remove finished frame
                 raise # Propagate event
-            except GeneratorExit: # If frame finished without result
-                # Frame result stays None
-                if msg is None: self.ready.send(self) # Send ready event after coroutine ran once
-                self.remove() # Remove finished frame
-                raise # Propagate event
+            except RuntimeError as err:
+                abc = 0
             except Exception as err: # If frame raised exception
-                # Frame result stays None
-                self.remove() # Remove finished frame
                 raise # Propagate event
             else: # If frame awaits awaitable
                 awaitable._listeners.add(self) # Listen to events of awaitable
                 if msg is None: self.ready.send(self) # Send ready event after coroutine ran once
 
-    def remove(self):
+    def _remove(self):
         """Remove this awaitable from the frame hierarchy.
 
+        This function is for internal use. It removes the frame without raising GeneratorExit exceptions and without posting freme-removed events
+
         Returns:
-            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
+            GeneratorExit: A generator exit exception that should be raised after the frame is fully removed
+            None: No generator exit exception has to be raised
         """
 
         if self.removed:
@@ -658,43 +748,63 @@ class Frame(Awaitable):
         if self.removed: # If this frame was closed in response to the free event, ...
             return False
 
-        # Remove child frames
-        genexit = None
-        while self._children:
-            try:
-                self._children[-1].remove()
-            except GeneratorExit as err:
-                genexit = err # Delay raising GeneratorExit
+        with self.remove_lock:
+            # Remove child frames
+            genexit = None
+            while self._children:
+                try:
+                    self._children[-1].remove()
+                except GeneratorExit as err:
+                    genexit = err # Delay raising GeneratorExit
 
-        # Remove self from parent frame
-        if self._parent:
-            self._parent._children.remove(self)
+            # Remove self from parent frame
+            if self._parent:
+                self._parent._children.remove(self)
 
-        # Remove primitives
-        while self._primitives:
-            self._primitives[-1].remove()
+            # Remove primitives
+            while self._primitives:
+                self._primitives[-1].remove()
 
-        # Stop framefunc
-        if self._generator: # If framefunc is a coroutine
-            if self._generator.cr_running:
-                # Calling coroutine.close() from within the coroutine is illegal, so we throw a GeneratorExit manually instead
-                self._generator = None
-                genexit = GeneratorExit
-            else:
-                self._generator.close()
-                self._generator = None
+            # Stop framefunc
+            if self._generator: # If framefunc is a coroutine
+                if self._generator.cr_running:
+                    # Calling coroutine.close() from within the coroutine is illegal, so we throw a GeneratorExit manually instead
+                    self._generator = None
+                    genexit = GeneratorExit
+                else:
+                    self._generator.close()
+                    self._generator = None
+
+            # Remove awaitable
+            super().remove()
+
+        return genexit
+
+    def remove(self):
+        """Remove this awaitable from the frame hierarchy.
+
+        Returns:
+            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
+        """
+
+        genexit = self._remove()
+
+        if genexit == False:
+            return False
 
         # Post frame removed event
         _THREAD_LOCALS._current_eventloop.postevent(Event(self, self, None))
-
-        # Remove awaitable
-        super().remove()
 
         # Raise delayed GeneratorExit exception
         if genexit:
             raise genexit
 
         return True
+
+class PFrame(Frame):
+    def __init__(self, startup_behaviour=FrameStartupBehaviour.delayed):
+        super().__init__(startup_behaviour)
+        self._eventloop_affinity = None
 
 
 class Primitive(object):

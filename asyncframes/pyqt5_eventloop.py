@@ -38,6 +38,9 @@ class EventLoop(asyncframes.AbstractEventLoop, QObject, metaclass=EventLoopMeta)
     def _stop(self):
         self.loop.exit()
 
+    def _close(self):
+        pass
+
     def _post(self, delay, callback, args):
         QTimer.singleShot(1000 * delay, functools.partial(callback, *args))
     
@@ -47,3 +50,21 @@ class EventLoop(asyncframes.AbstractEventLoop, QObject, metaclass=EventLoopMeta)
     @pyqtSlot(float, object)
     def _invoke_slot(self, delay, callback):
         QTimer.singleShot(1000 * delay, callback)
+
+    def _spawnthread(self, target, args):
+        class Thread(QThread):
+            def __init__(self, target, args):
+                super().__init__()
+                self.target = target
+                self.args = args
+            def run(self):
+                try:
+                    self.target(*self.args)
+                except:
+                    print(traceback.format_exc()) # pragma: no cover
+        thread = Thread(target, args)
+        thread.start()
+        return thread
+
+    def _jointhread(self, thread):
+        thread.wait()
