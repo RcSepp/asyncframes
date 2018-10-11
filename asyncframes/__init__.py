@@ -30,8 +30,8 @@ class ThreadLocals(threading.local):
 _THREAD_LOCALS = ThreadLocals()
 
 class FrameStartupBehaviour(enum.Enum):
-    delayed = enum.auto()
-    immediate = enum.auto()
+    delayed = 1
+    immediate = 2
 
 class InvalidOperationException(Exception):
     """Raised when operations are performed out of context.
