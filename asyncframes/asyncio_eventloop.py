@@ -7,6 +7,8 @@ import asyncframes
 
 
 class EventLoop(asyncframes.AbstractEventLoop):
+    """An implementation of AbstractEventLoop based on asyncio."""
+
     def __init__(self):
         super().__init__()
         try:

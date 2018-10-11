@@ -7,17 +7,27 @@ import functools
 import traceback
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QTimer, QThread, QObject, Qt
-from PyQt5.Qt import pyqtSlot, Q_ARG
+from PyQt5.Qt import pyqtSlot, Q_ARG, QCoreApplication
 import asyncframes
 
 
 class EventLoopMeta(type(QObject), abc.ABCMeta):
 	pass
 class EventLoop(asyncframes.AbstractEventLoop, QObject, metaclass=EventLoopMeta):
-    # Start Qt
-    qt = QApplication.instance() or QApplication([])
+    """An implementation of AbstractEventLoop based on PyQt5.
 
-    def __init__(self):
+    Args:
+        gui_enabled (bool, optional): Defaults to True. If `False`, Qt will run without UI. This argument applies
+                                      to the whole application and will be ignored for subsequent event loops.
+    """
+
+    qt = None
+
+    def __init__(self, gui_enabled=True):
+        # Start Qt
+        if EventLoop.qt is None:
+            EventLoop.qt = QCoreApplication.instance() or QApplication([]) if gui_enabled else QCoreApplication([])
+
         asyncframes.AbstractEventLoop.__init__(self)
         QObject.__init__(self)
         self.moveToThread(QThread.currentThread())

@@ -836,7 +836,7 @@ class TestPyQt5EventLoop(TestAsyncFrames):
 
             raise unittest.SkipTest
         else:
-            self.loop = EventLoop()
+            self.loop = EventLoop(gui_enabled=False)
             super().setUp()
 
     def test_thread_independance(self):
