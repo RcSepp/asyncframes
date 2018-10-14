@@ -16,9 +16,9 @@ import warnings
 
 
 __all__ = [
-    'all_', 'animate', 'any_', 'Awaitable', 'Event', 'AbstractEventLoop',
-    'EventSource', 'Frame', 'FrameStartupBehaviour', 'InvalidOperationException',
-    'hold', 'PFrame', 'Primitive', 'sleep'
+    'all_', 'animate', 'any_', 'Awaitable', 'AbstractEventLoop', 'Event', 'EventSource',
+    'find_parent', 'Frame', 'FrameStartupBehaviour', 'get_current_eventloop_index',
+    'InvalidOperationException', 'hold', 'PFrame', 'Primitive', 'sleep'
 ]
 __version__ = '1.1.0'
 
@@ -188,9 +188,6 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         else: self._result = msg
 
         self._stop() # Stop event loop
-
-def get_current_eventloop_index():
-    return _THREAD_LOCALS._current_eventloop.eventloops.index(_THREAD_LOCALS._current_eventloop)
 
 
 class Awaitable(collections.abc.Awaitable):
@@ -829,9 +826,7 @@ class Primitive(object):
             raise TypeError("'owner' must be of type Frame")
 
         # Find parent frame of class 'owner'
-        self._owner = _THREAD_LOCALS._current_frame
-        while self._owner and not issubclass(type(self._owner), owner):
-            self._owner = self._owner._parent
+        self._owner = find_parent(owner)
         if not self._owner:
             raise InvalidOperationException(self.__class__.__name__ + " can't be defined outside " + owner.__name__)
 
@@ -850,3 +845,13 @@ class Primitive(object):
         self._removed = True
         self._owner._primitives.remove(self)
         return True
+
+
+def get_current_eventloop_index():
+    return _THREAD_LOCALS._current_eventloop.eventloops.index(_THREAD_LOCALS._current_eventloop)
+
+def find_parent(parenttype):
+    parent = _THREAD_LOCALS._current_frame
+    while parent and not issubclass(type(parent), parenttype):
+        parent = parent._parent
+    return parent
