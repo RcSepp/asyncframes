@@ -209,6 +209,24 @@ class Awaitable(collections.abc.Awaitable):
         self._listeners = set()
         self._eventloop_affinity = None
 
+    def _remove(self, msg):
+        if self._removed:
+            return False
+        self._removed = True
+
+        # Wake up listeners
+        if self._listeners:
+            listeners = self._listeners
+            self._listeners = set()
+            for listener in listeners:
+                if listener._eventloop_affinity is None or listener._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
+                    listener.process(self, msg)
+                else:
+                    listener._eventloop_affinity._invoke(0, listener.process, (self, msg))
+
+        del self
+        return True
+
     def remove(self):
         """Remove this awaitable from the frame hierarchy.
 
@@ -216,11 +234,7 @@ class Awaitable(collections.abc.Awaitable):
             bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
         """
 
-        if self._removed:
-            return False
-        self._removed = True
-        del self
-        return True
+        return self._remove(GeneratorExit())
 
     @property
     def removed(self):
@@ -278,24 +292,17 @@ class Awaitable(collections.abc.Awaitable):
                 self._result = err
 
                 # Call exception handler
-                if err != msg and _THREAD_LOCALS._current_eventloop.eventloops[0].frame_exception_handler:
-                    _THREAD_LOCALS._current_eventloop.eventloops[0].frame_exception_handler(err)
-
-            # Remove awaitable
-            if hasattr(self, '_remove'):
-                self._remove()
-            else:
-                self.remove()
-
-            # Propagate to listeners
-            if self._listeners:
-                listeners = self._listeners
-                self._listeners = set()
-                for listener in listeners:
-                    if listener._eventloop_affinity is None or listener._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
-                        listener.process(self, err)
+                if err != msg:
+                    maineventloop = _THREAD_LOCALS._current_eventloop.eventloops[0]
+                    if maineventloop.frame_exception_handler:
+                        maineventloop.frame_exception_handler(err)
+                    elif maineventloop._eventloop_affinity is None or maineventloop._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
+                        maineventloop.process(self, err)
                     else:
-                        listener._eventloop_affinity._invoke(0, listener.process, (self, err))
+                        maineventloop._eventloop_affinity._invoke(0, maineventloop.process, (self, err))
+
+            # Remove awaitable and propagate event
+            self._remove(err)
 
     def __and__(self, other):
         """Register A & B as shortcut for all_(A, B)
@@ -338,7 +345,7 @@ class EventSource(Awaitable):
         self.autoremove = autoremove
         self.eventloop = _THREAD_LOCALS._current_eventloop
 
-    def remove(self):
+    def _remove(self, msg):
         """Remove this awaitable from the frame hierarchy.
 
         If `autoremove` is False, this function is supressed
@@ -346,8 +353,19 @@ class EventSource(Awaitable):
         Returns:
             bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
         """
-
-        return super().remove() if self.autoremove else False
+        
+        if self.autoremove:
+            return super()._remove(msg)
+        else:
+            # Wake up listeners
+            if self._listeners:
+                listeners = self._listeners
+                self._listeners = set()
+                for listener in listeners:
+                    if listener._eventloop_affinity is None or listener._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
+                        listener.process(self, msg)
+                    else:
+                        listener._eventloop_affinity._invoke(0, listener.process, (self, msg))
 
     def __bool__(self):
         return self._removed
@@ -426,6 +444,7 @@ class all_(Awaitable):
 
     def __init__(self, *awaitables):
         super().__init__("all({})".format(", ".join(str(a) for a in awaitables)))
+        self._remove_lock = threading.Lock()
 
         self._awaitables = set()
         self._result = {}
@@ -433,7 +452,7 @@ class all_(Awaitable):
             if awaitable.removed:
                 if isinstance(awaitable._result, Exception):
                     self._result = awaitable._result
-                    super().remove()
+                    super()._remove(self._result)
                     return
                 else:
                     self._result[awaitable] = awaitable._result
@@ -442,7 +461,7 @@ class all_(Awaitable):
                 awaitable._listeners.add(self)
 
         if len(self._result) == len(awaitables):
-            super().remove()
+            super()._remove(self._result)
             return
 
         self._parent = _THREAD_LOCALS._current_frame
@@ -473,21 +492,31 @@ class all_(Awaitable):
             stop.value = self._result
             raise stop
 
-    def remove(self):
+    def _remove(self, msg):
         """Remove this awaitable from the frame hierarchy.
 
         Returns:
             bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
         """
 
-        if not super().remove():
+        if self.removed:
             return False
-        for awaitable in self._awaitables:
-            awaitable._listeners.discard(self)
-        self._awaitables.clear()
-        if self._parent:
-            self._parent._children.remove(self)
-        return True
+
+        with self._remove_lock:
+            if self.removed: # If this frame was closed while acquiring the lock, ...
+                return False
+
+            for awaitable in self._awaitables:
+                awaitable._listeners.discard(self)
+            self._awaitables.clear()
+            if self._parent:
+                self._parent._children.remove(self)
+
+            # Remove awaitable
+            super()._remove(msg)
+
+            return True
+        return False
 
 class any_(Awaitable):
     """An awaitable that blocks the awaiting frame until any of the passed awaitables wakes up.
@@ -498,12 +527,13 @@ class any_(Awaitable):
 
     def __init__(self, *awaitables):
         super().__init__("any({})".format(", ".join(str(a) for a in awaitables)))
+        self._remove_lock = threading.Lock()
 
         self._awaitables = set()
         for awaitable in awaitables:
             if awaitable.removed:
                 self._result = awaitable._result
-                super().remove()
+                super()._remove(self._result)
                 return
             else:
                 self._awaitables.add(awaitable)
@@ -528,21 +558,31 @@ class any_(Awaitable):
         if isinstance(msg, BaseException):
             raise msg
 
-    def remove(self):
+    def _remove(self, msg):
         """Remove this awaitable from the frame hierarchy.
 
         Returns:
             bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
         """
 
-        if not super().remove():
+        if self.removed:
             return False
-        for awaitable in self._awaitables:
-            awaitable._listeners.discard(self)
-        self._awaitables.clear()
-        if self._parent:
-            self._parent._children.remove(self)
-        return True
+
+        with self._remove_lock:
+            if self.removed: # If this frame was closed while acquiring the lock, ...
+                return False
+
+            for awaitable in self._awaitables:
+                awaitable._listeners.discard(self)
+            self._awaitables.clear()
+            if self._parent:
+                self._parent._children.remove(self)
+
+            # Remove awaitable
+            super()._remove(msg)
+
+            return True
+        return False
 
 
 class sleep(EventSource):
@@ -655,7 +695,7 @@ class Frame(Awaitable):
         self.ready = EventSource(str(self.__name__) + ".ready", True)
         self.free = EventSource(str(self.__name__) + ".free", True)
         self._eventloop_affinity = _THREAD_LOCALS._current_eventloop
-        self.remove_lock = threading.Lock()
+        self._remove_lock = threading.Lock()
 
     def create(self, framefunc, *frameargs, **framekwargs):
         """Start the frame function with the given arguments.
@@ -726,14 +766,11 @@ class Frame(Awaitable):
                 awaitable._listeners.add(self) # Listen to events of awaitable
                 if msg is None: self.ready.send(self) # Send ready event after coroutine ran once
 
-    def _remove(self):
+    def _remove(self, msg):
         """Remove this awaitable from the frame hierarchy.
 
-        This function is for internal use. It removes the frame without raising GeneratorExit exceptions and without posting freme-removed events
-
         Returns:
-            GeneratorExit: A generator exit exception that should be raised after the frame is fully removed
-            None: No generator exit exception has to be raised
+            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
         """
 
         if self.removed:
@@ -745,12 +782,15 @@ class Frame(Awaitable):
         if self.removed: # If this frame was closed in response to the free event, ...
             return False
 
-        with self.remove_lock:
+        with self._remove_lock:
+            if self.removed: # If this frame was closed while acquiring the lock, ...
+                return False
+
             # Remove child frames
             genexit = None
             while self._children:
                 try:
-                    self._children[-1].remove()
+                    self._children[-1]._remove(GeneratorExit())
                 except GeneratorExit as err:
                     genexit = err # Delay raising GeneratorExit
 
@@ -773,30 +813,14 @@ class Frame(Awaitable):
                     self._generator = None
 
             # Remove awaitable
-            super().remove()
+            super()._remove(msg)
 
-        return genexit
+            # Raise delayed GeneratorExit exception
+            if genexit:
+                raise genexit
 
-    def remove(self):
-        """Remove this awaitable from the frame hierarchy.
-
-        Returns:
-            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
-        """
-
-        genexit = self._remove()
-
-        if genexit == False:
-            return False
-
-        # Post frame removed event
-        _THREAD_LOCALS._current_eventloop.postevent(Event(self, self, None))
-
-        # Raise delayed GeneratorExit exception
-        if genexit:
-            raise genexit
-
-        return True
+            return True
+        return False
 
 class PFrame(Frame):
     def __init__(self, startup_behaviour=FrameStartupBehaviour.delayed):
@@ -848,7 +872,7 @@ class Primitive(object):
 
 
 def get_current_eventloop_index():
-    return _THREAD_LOCALS._current_eventloop.eventloops.index(_THREAD_LOCALS._current_eventloop)
+    return _THREAD_LOCALS._current_eventloop.eventloops.index(_THREAD_LOCALS._current_eventloop) if _THREAD_LOCALS._current_eventloop and hasattr(_THREAD_LOCALS._current_eventloop, 'eventloops') else None
 
 def find_parent(parenttype):
     parent = _THREAD_LOCALS._current_frame
