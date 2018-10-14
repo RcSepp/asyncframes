@@ -4,10 +4,12 @@
 
 import datetime
 import io
+import linecache
 import logging
 import math
 import threading
 import queue
+import re
 import time
 import unittest
 from asyncframes import *
@@ -18,6 +20,71 @@ from asyncframes import _THREAD_LOCALS
 
 # NUM_ITERATIONS controls the number of times each test is executed
 NUM_ITERATIONS = 1
+
+# If true, any exceptions during an iteration of a test case will print a full line-by-line trace of the executed test
+USE_TRACE = False
+
+
+
+
+
+class Trace(object):
+    BASE_DIR = "/home/sepp/Development/Python/asyncframes/"
+    SKIP_FILES = set([
+        "asyncframes/asyncio_eventloop.py",
+        "asyncframes/pyqt5_eventloop.py"
+    ])
+    SKIP_FUNCTIONS = {
+        "test_asyncframes.py": set([
+            "format"
+        ])
+    }
+    def __init__(self):
+        self.trace_depth = 0
+        self.trace_stream = io.StringIO()
+
+    def _trace(self, frame, event, arg):
+        filename = frame.f_code.co_filename
+        #if 'asyncframes' not in filename:
+        if not filename.startswith(Trace.BASE_DIR):
+            return self._trace
+
+        fname = filename[len(Trace.BASE_DIR):]
+        if fname in Trace.SKIP_FILES:
+            return self._trace
+
+        coname = frame.f_code.co_name
+        if fname in Trace.SKIP_FUNCTIONS and coname in Trace.SKIP_FUNCTIONS[fname]:
+            return self._trace
+
+        if event == "line":
+            lineno = frame.f_lineno
+            line = linecache.getline(filename, lineno).lstrip()
+            threadno = get_current_eventloop_index()
+            self.trace_stream.write('thread {} | {}", line {}, in {}:'.format(threadno, fname, lineno, coname).ljust(80) + line)
+            pass
+        return self._trace
+
+    def run(self, func, *args, **kwds):
+        if USE_TRACE:
+            self.trace_stream.truncate(0) # Reset trace
+            self.trace_stream.seek(0) # Reset trace
+            threading.settrace(self._trace) # Enable trace
+            try:
+                result = func(*args, **kwds)
+            finally:
+                threading.settrace(None) # Disable trace
+            return result
+        else:
+            return func(*args, **kwds)
+    
+    def print(self):
+        print(self.trace_stream.getvalue())
+
+
+
+
+
 
 class MyFrame(Frame):
     @staticmethod
@@ -78,20 +145,38 @@ class TestAsyncFrames(unittest.TestCase):
         loghandler.setFormatter(self.logformatter)
         self.log.addHandler(loghandler)
 
-    def run_frame(self, frame, *frameargs, expected_log=None):
+    def run_frame(self, frame, *frameargs, expected_log=None, assert_raises=None, assert_raises_regex=None):
         @Frame
         async def mainframe():
             self.logstream.truncate(0) # Reset log
             self.logstream.seek(0) # Reset log
             self.logformatter.starttime = datetime.datetime.now() # Reset log start time
             await frame(*frameargs)
+        t = Trace()
         for i in range(NUM_ITERATIONS):
-            self.loop.run(mainframe)
-            self.log.debug('done')
-            if expected_log is not None:
-                # Compare log with expected_log
-                expected = '\n'.join(line.strip() for line in expected_log.strip('\n').split('\n')) # Remove leading and trailing empty lines and white space
-                self.assertEqual(expected, self.logstream.getvalue())
+            try:
+                t.run(self.loop.run, mainframe)
+                #self.loop.run(mainframe)
+                self.log.debug('done')
+                if expected_log is not None:
+                    # Compare log with expected_log
+                    expected = '\n'.join(line.strip() for line in expected_log.strip('\n').split('\n')) # Remove leading and trailing empty lines and white space
+                    self.assertEqual(expected, self.logstream.getvalue())
+            except Exception as err:
+                if assert_raises:
+                    failed = type(err) != assert_raises
+                elif assert_raises_regex:
+                    failed = type(err) != assert_raises_regex[0] or not re.match(assert_raises_regex[1], str(err))
+                else:
+                    failed = True
+                if failed:
+                    print(err)
+                    t.print()
+                    raise
+            else:
+                if assert_raises or assert_raises_regex:
+                    t.print()
+                    raise AssertionError(assert_raises.__name__ + " not raised")
 
     def test_simple(self):
         test = self
@@ -265,8 +350,7 @@ class TestAsyncFrames(unittest.TestCase):
         @MyFrame2
         async def f2():
             MyPrimitive()
-        with test.assertRaises(InvalidOperationException):
-            test.run_frame(f2)
+        test.run_frame(f2, assert_raises=InvalidOperationException)
 
         @MyFrame
         async def f3():
@@ -631,8 +715,7 @@ class TestAsyncFrames(unittest.TestCase):
             0.1: main
             0.1: done
         """)
-        with test.assertRaises(ZeroDivisionError):
-            test.run_frame(raise_exception)
+        test.run_frame(raise_exception, assert_raises=ZeroDivisionError)
         test.run_frame(main, expected_log="""
             0.1: main
             0.1: done
@@ -650,11 +733,8 @@ class TestAsyncFrames(unittest.TestCase):
         test = self
         @Frame
         def raise_already_running():
-            test.run_frame(wait, test, 0.0, '')
-        with test.assertRaisesRegex(InvalidOperationException, "Another event loop is already running"):
-            test.run_frame(raise_already_running, expected_log="""
-                0.0: done
-            """)
+            test.loop.run(wait, test, 0.0, '')
+        test.run_frame(raise_already_running, assert_raises_regex=(InvalidOperationException, "Another event loop is already running"))
         with test.assertRaisesRegex(InvalidOperationException, "Can't call frame without a running event loop"):
             wait(test, 0.0, '')
 
@@ -765,8 +845,7 @@ class TestAsyncFrames(unittest.TestCase):
         @Frame
         async def raise_exception():
             raise ZeroDivisionError
-        with test.assertRaises(ZeroDivisionError):
-            test.run_frame(main)
+        test.run_frame(main, assert_raises=ZeroDivisionError)
 
     def test_startup_behaviour(self):
         test = self
