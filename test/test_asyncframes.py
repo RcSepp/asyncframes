@@ -23,6 +23,11 @@ from asyncframes import _THREAD_LOCALS
 # NUM_ITERATIONS controls the number of times each test is executed
 NUM_ITERATIONS = 1
 
+# NUM_THREADS controls the number of worker threads to start when running an event loop
+# If 0, the number of CPU threads is used (according to os.sched_getaffinity(0))
+# If 1, no multithreading will be performed
+NUM_THREADS = 0
+
 # If true, any exceptions during an iteration of a test case will print a full line-by-line trace of the executed test
 USE_TRACE = False
 
@@ -179,8 +184,7 @@ class TestAsyncFrames(unittest.TestCase):
         t = Trace()
         for i in range(NUM_ITERATIONS):
             try:
-                t.run(self.loop.run, mainframe)
-                #self.loop.run(mainframe)
+                t.run(self.loop.run, mainframe, num_threads=NUM_THREADS)
                 self.log.debug('done')
                 if expected_log is not None:
                     # Compare log with expected_log
@@ -757,7 +761,7 @@ class TestAsyncFrames(unittest.TestCase):
         test = self
         @Frame
         def raise_already_running():
-            test.loop.run(wait, test, 0.0, '')
+            test.loop.run(wait, test, 0.0, '', num_threads=NUM_THREADS)
         test.run_frame(raise_already_running, assert_raises_regex=(InvalidOperationException, "Another event loop is already running"))
         with test.assertRaisesRegex(InvalidOperationException, "Can't call frame without a running event loop"):
             wait(test, 0.0, '')

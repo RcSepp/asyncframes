@@ -75,7 +75,9 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         self._eventloop_affinity = self
         self._result = None
 
-    def run(self, frame, *frameargs, **framekwargs):
+    def run(self, frame, *frameargs, num_threads=0, **framekwargs):
+        if num_threads <= 0:
+            num_threads = len(os.sched_getaffinity(0))
         if _THREAD_LOCALS._current_eventloop is not None:
             raise InvalidOperationException("Another event loop is already running")
         _THREAD_LOCALS._current_eventloop = self
@@ -89,8 +91,7 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
             eventloop.event_queue = parent_eventloop.event_queue
             eventloop._run()
             eventloop._close()
-        num_workers = len(os.sched_getaffinity(0)) - 1
-        workers = [self._spawnthread(target=worker_thread, args=(self,)) for i in range(num_workers)]
+        workers = [self._spawnthread(target=worker_thread, args=(self,)) for i in range(num_threads - 1)]
 
         # Collect an array of all eventloops and distribute that array among all eventloops
         self.eventloops = [self]
@@ -123,15 +124,26 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
                 return self._result
 
     def _enqueue(self, delay, callback, args, eventloop_affinity=None):
-        if eventloop_affinity: # If a target eventloop was provided
-            if eventloop_affinity == self:
+        if len(self.eventloops) == 1: # If running singlethreaded, ...
+            # Execute callback from current eventloop
+            if _THREAD_LOCALS._current_eventloop == self:
+                self._post(delay, callback, (eventloop_affinity, ) + args)
+            else:
+                self._invoke(delay, callback, (eventloop_affinity, ) + args)
+        elif eventloop_affinity: # If a target eventloop was provided, ...
+            # Execute callback from target eventloop
+            if _THREAD_LOCALS._current_eventloop == eventloop_affinity:
                 eventloop_affinity._post(delay, callback, (eventloop_affinity, ) + args)
             else:
                 eventloop_affinity._invoke(delay, callback, (eventloop_affinity, ) + args)
-        else: # If no target eventloop was provided
+        else: # If no target eventloop was provided, ...
             if delay > 0.0:
                 # Call _enqueue again with 0 delay after 'delay' seconds
-                self.eventloops[-1]._invoke(delay, self._enqueue, (0.0, callback, args)) #TODO: Consider running a dedicated event loop for delays
+                #TODO: Consider running a dedicated event loop instead of eventloops[-1] for delays
+                if _THREAD_LOCALS._current_eventloop == self.eventloops[-1]:
+                    self.eventloops[-1]._post(delay, self._enqueue, (0.0, callback, args))
+                else:
+                    self.eventloops[-1]._invoke(delay, self._enqueue, (0.0, callback, args))
             else: # If delay == 0, ...
                 # Place the callback on the event queue
                 self.event_queue.put((callback, args))
