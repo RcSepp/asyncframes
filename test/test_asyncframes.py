@@ -10,8 +10,10 @@ import math
 import threading
 import queue
 import re
+import sys
 import time
 import unittest
+import asyncframes
 from asyncframes import *
 from asyncframes import _THREAD_LOCALS
 
@@ -32,11 +34,22 @@ class Trace(object):
     BASE_DIR = "/home/sepp/Development/Python/asyncframes/"
     SKIP_FILES = set([
         "asyncframes/asyncio_eventloop.py",
-        "asyncframes/pyqt5_eventloop.py"
+        "asyncframes/pyqt5_eventloop.py",
+        #"asyncframes/__init__.py"
     ])
     SKIP_FUNCTIONS = {
-        "test_asyncframes.py": set([
-            "format"
+        "test/test_asyncframes.py": set([
+            "TimedFormatter.format"
+        ]),
+        "asyncframes/__init__.py": set([
+            "worker_thread",
+            "EventLoop.__init__",
+            "EventLoop._spawnthread",
+            "EventLoop.<listcomp>",
+            "Frame.__init__",
+            "EventSource.__init__",
+            "Event.__init__",
+            "Frame.removed"
         ])
     }
     def __init__(self):
@@ -54,6 +67,8 @@ class Trace(object):
             return self._trace
 
         coname = frame.f_code.co_name
+        if 'self' in frame.f_locals:
+            coname = frame.f_locals['self'].__class__.__name__ + '.' + coname
         if fname in Trace.SKIP_FUNCTIONS and coname in Trace.SKIP_FUNCTIONS[fname]:
             return self._trace
 
@@ -61,19 +76,27 @@ class Trace(object):
             lineno = frame.f_lineno
             line = linecache.getline(filename, lineno).lstrip()
             threadno = get_current_eventloop_index()
-            self.trace_stream.write('thread {} | {}", line {}, in {}:'.format(threadno, fname, lineno, coname).ljust(80) + line)
-            pass
+            #self.trace_stream.write('thread {} | "{}", line {}, in {}:'.format(threadno, fname, lineno, coname).ljust(80) + line)
+            print('thread {} | "{}", line {}, in {}:'.format(threadno, fname, lineno, coname).ljust(80) + line, end='')
+            if getattr(_THREAD_LOCALS, '_current_frame', None) and \
+               _THREAD_LOCALS._current_frame._eventloop_affinity and \
+               _THREAD_LOCALS._current_frame._eventloop_affinity != _THREAD_LOCALS._current_eventloop and \
+               fname == "test/test_asyncframes.py":
+                raise AssertionError('eventloop affinity error: thread {} | "{}", line {}, in {}: {}'.format(threadno, fname, lineno, coname, line))
         return self._trace
 
     def run(self, func, *args, **kwds):
         if USE_TRACE:
             self.trace_stream.truncate(0) # Reset trace
             self.trace_stream.seek(0) # Reset trace
+            sys.settrace(self._trace) # Enable trace
             threading.settrace(self._trace) # Enable trace
             try:
                 result = func(*args, **kwds)
             finally:
+                sys.settrace(None) # Disable trace
                 threading.settrace(None) # Disable trace
+                self.print() #DELETE
             return result
         else:
             return func(*args, **kwds)
@@ -175,9 +198,12 @@ class TestAsyncFrames(unittest.TestCase):
                     t.print()
                     raise
             else:
-                if assert_raises or assert_raises_regex:
+                if assert_raises:
                     t.print()
                     raise AssertionError(assert_raises.__name__ + " not raised")
+                elif assert_raises_regex:
+                    t.print()
+                    raise AssertionError(assert_raises_regex.__name__ + " not raised")
 
     def test_simple(self):
         test = self
@@ -872,7 +898,59 @@ class TestAsyncFrames(unittest.TestCase):
             await sleep()
         test.run_frame(frame)
 
-    def test_thread_independance(self):
+    def test_pframe(self):
+        test = self
+        @PFrame
+        async def pframe():
+            pframe_threadid = threading.get_ident()
+            test.log.debug('pframe_1')
+            await sleep(0.1)
+            test.log.debug('pframe_2')
+            await sleep(0.1)
+            test.log.debug('pframe_3')
+        @asyncframes.Frame # This has to be a Frame to test successfully. Make sure it's a Frame even when 'Frame' is overwritten with 'PFrame'
+        async def main():
+            main_threadid = threading.get_ident()
+            p = pframe()
+            await p.ready
+            test.assertEqual(threading.get_ident(), main_threadid)
+            test.log.debug('main_1')
+            await p
+            test.assertEqual(threading.get_ident(), main_threadid)
+            test.log.debug('main_2')
+        test.run_frame(main, expected_log="""
+            0.0: pframe_1
+            0.0: main_1
+            0.1: pframe_2
+            0.2: pframe_3
+            0.2: main_2
+            0.2: done
+        """)
+
+    def test_pframe_send(self):
+        test = self
+        @PFrame
+        async def pframe(e):
+            await e
+        @PFrame
+        async def pframe2(self):
+            self.e = EventSource('my_event')
+            await self.e
+        @Frame
+        async def main(self):
+            e = EventSource('my_event')
+            p = pframe(e)
+            await p.ready
+            e.send(self)
+            test.assertEqual(p.removed, True)
+
+            p2 = pframe2()
+            await p2.ready
+            p2.e.send(self)
+            test.assertEqual(p2.removed, True)
+        test.run_frame(main)
+
+    def test_thread_independence(self):
         test = self
         errors = queue.Queue()
         def test_thread(tc):
@@ -884,7 +962,7 @@ class TestAsyncFrames(unittest.TestCase):
                 errors.put(err)
 
         testcases = unittest.defaultTestLoader.getTestCaseNames(test.__class__)
-        testcases.remove('test_thread_independance')
+        testcases.remove('test_thread_independence')
 
         threads = [threading.Thread(target=test_thread, args=(testcase,)) for testcase in testcases]
         for thread in threads:
@@ -919,7 +997,7 @@ class TestPyQt5EventLoop(TestAsyncFrames):
             self.loop = EventLoop(gui_enabled=False)
             super().setUp()
 
-    def test_thread_independance(self):
+    def test_thread_independence(self):
         test = self
         errors = queue.Queue()
         import PyQt5.Qt
@@ -937,7 +1015,7 @@ class TestPyQt5EventLoop(TestAsyncFrames):
                     errors.put(err)
 
         testcases = unittest.defaultTestLoader.getTestCaseNames(test.__class__)
-        testcases.remove('test_thread_independance')
+        testcases.remove('test_thread_independence')
 
         threads = [TestThread(testcase) for testcase in testcases]
         for thread in threads:

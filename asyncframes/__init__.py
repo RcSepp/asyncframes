@@ -161,6 +161,8 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
 
         try:
             event.source.process(event.source, event)
+        except GeneratorExit:
+            pass # Catch any leaked GeneratorExit's (This can happen when a thread tries to cancel another thread's coroutine by raising GeneratorExit)
         finally:
             # Restore current frame
             _THREAD_LOCALS._current_frame = currentframe
@@ -178,6 +180,8 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
 
         try:
             frame.process(None, None)
+        except GeneratorExit:
+            pass # Catch any leaked GeneratorExit's (This can happen when a thread tries to cancel another thread's coroutine by raising GeneratorExit)
         finally:
             # Restore current frame
             _THREAD_LOCALS._current_frame = currentframe
@@ -782,44 +786,50 @@ class Frame(Awaitable):
         if self.removed: # If this frame was closed in response to the free event, ...
             return False
 
-        with self._remove_lock:
+        if self._remove_lock.acquire(blocking=False):
             if self.removed: # If this frame was closed while acquiring the lock, ...
+                self._remove_lock.release()
                 return False
 
-            # Remove child frames
-            genexit = None
-            while self._children:
-                try:
-                    self._children[-1]._remove(GeneratorExit())
-                except GeneratorExit as err:
-                    genexit = err # Delay raising GeneratorExit
+            try:
+                # Remove child frames
+                genexit = None
+                while self._children:
+                    try:
+                        self._children[-1]._remove(GeneratorExit())
+                    except GeneratorExit as err:
+                        genexit = err # Delay raising GeneratorExit
 
-            # Remove self from parent frame
-            if self._parent:
-                self._parent._children.remove(self)
+                # Remove self from parent frame
+                if self._parent:
+                    self._parent._children.remove(self)
 
-            # Remove primitives
-            while self._primitives:
-                self._primitives[-1].remove()
+                # Remove primitives
+                while self._primitives:
+                    self._primitives[-1].remove()
 
-            # Stop framefunc
-            if self._generator: # If framefunc is a coroutine
-                if self._generator.cr_running:
-                    # Calling coroutine.close() from within the coroutine is illegal, so we throw a GeneratorExit manually instead
-                    self._generator = None
-                    genexit = GeneratorExit
-                else:
-                    self._generator.close()
-                    self._generator = None
+                # Stop framefunc
+                if self._generator: # If framefunc is a coroutine
+                    if self._generator.cr_running:
+                        # Calling coroutine.close() from within the coroutine is illegal, so we throw a GeneratorExit manually instead
+                        try:
+                            self._generator.close()
+                        except ValueError:
+                            genexit = GeneratorExit()
+                        self._generator = None
+                    else:
+                        self._generator.close()
+                        self._generator = None
 
-            # Remove awaitable
-            super()._remove(msg)
+                # Remove awaitable
+                super()._remove(msg)
+            finally:
+                self._remove_lock.release()
 
-            # Raise delayed GeneratorExit exception
-            if genexit:
-                raise genexit
-
-            return True
+                # Raise delayed GeneratorExit exception
+                if genexit:
+                    raise genexit
+                return True
         return False
 
 class PFrame(Frame):
@@ -872,7 +882,7 @@ class Primitive(object):
 
 
 def get_current_eventloop_index():
-    return _THREAD_LOCALS._current_eventloop.eventloops.index(_THREAD_LOCALS._current_eventloop) if _THREAD_LOCALS._current_eventloop and hasattr(_THREAD_LOCALS._current_eventloop, 'eventloops') else None
+    return _THREAD_LOCALS._current_eventloop.eventloops.index(_THREAD_LOCALS._current_eventloop) if getattr(_THREAD_LOCALS, '_current_eventloop', None) and hasattr(_THREAD_LOCALS._current_eventloop, 'eventloops') else None
 
 def find_parent(parenttype):
     parent = _THREAD_LOCALS._current_frame
