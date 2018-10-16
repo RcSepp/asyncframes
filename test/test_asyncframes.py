@@ -198,12 +198,9 @@ class TestAsyncFrames(unittest.TestCase):
                     t.print()
                     raise
             else:
-                if assert_raises:
+                if assert_raises or assert_raises_regex:
                     t.print()
-                    raise AssertionError(assert_raises.__name__ + " not raised")
-                elif assert_raises_regex:
-                    t.print()
-                    raise AssertionError(assert_raises_regex.__name__ + " not raised")
+                    raise AssertionError((assert_raises or assert_raises_regex).__name__ + " not raised")
 
     def test_simple(self):
         test = self
@@ -603,7 +600,7 @@ class TestAsyncFrames(unittest.TestCase):
 
             if test.supports_invoke:
                 threading.Thread(target=invoke_event, args=(0.1, ae)).start()
-                threading.Thread(target=ae.invoke, args=(self, 'my event args', 0.2)).start()
+                threading.Thread(target=ae.post, args=(self, 'my event args', 0.2)).start()
                 e = await ae
                 test.log.debug("'%s' raised '%s' with args '%s'", e.sender, e.source, e.args)
                 e = await ae
@@ -623,7 +620,7 @@ class TestAsyncFrames(unittest.TestCase):
             awaitable_event.post(self, 'my event args')
         def invoke_event(seconds, awaitable_event):
             time.sleep(seconds)
-            awaitable_event.invoke('invoke_event', 'my event args')
+            awaitable_event.post('invoke_event', 'my event args')
 
         test.run_frame(main, expected_log="""
             0.1: 'send_event' raised 'my event' with args 'my event args'

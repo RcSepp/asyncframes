@@ -170,10 +170,6 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
     def postevent(self, event, delay=0):
         self._enqueue(delay, AbstractEventLoop.sendevent, (event, ), event.source._eventloop_affinity)
 
-    def invokeevent(self, event, delay=0):
-        warnings.warn("Invoking events is deprecated. Use post* functions instead.", category=DeprecationWarning, stacklevel=2)
-        self._enqueue(delay, AbstractEventLoop.sendevent, (event, ), event.source._eventloop_affinity)
-
     def _start_coroutine(self, frame):
         # Save current frame, since it will be modified inside Awaitable.process()
         currentframe = _THREAD_LOCALS._current_frame
@@ -359,7 +355,7 @@ class EventSource(Awaitable):
     def __init__(self, name, autoremove=False):
         super().__init__(name)
         self.autoremove = autoremove
-        self.eventloop = _THREAD_LOCALS._current_eventloop
+        self.eventloop = _THREAD_LOCALS._current_eventloop # Store creating eventloop, as a fallback in case self.post() is called from a thread without an eventloop
 
     def _remove(self, msg):
         """Remove this awaitable from the frame hierarchy.
@@ -420,19 +416,7 @@ class EventSource(Awaitable):
             delay (float, optional): Defaults to 0. The time in seconds to wait before posting the event
         """
 
-        _THREAD_LOCALS._current_eventloop.postevent(Event(sender, self, args), delay)
-
-    def invoke(self, sender, args=None, delay=0):
-        """Enqueue an event in the event loop from a different thread.
-
-        Args:
-            sender: The entity triggering the event, for example, the button instance on a button-press event
-            args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event
-            delay (float, optional): Defaults to 0. The time in seconds to wait before invoking the event
-        """
-
-        warnings.warn("Invoking events is deprecated. Use post* functions instead.", category=DeprecationWarning, stacklevel=2)
-        self.eventloop.invokeevent(Event(sender, self, args), delay)
+        (_THREAD_LOCALS._current_eventloop or self.eventloop).postevent(Event(sender, self, args), delay)
 
 class Event():
     """Data structure, containing information about the occurance of an event.
