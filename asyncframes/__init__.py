@@ -289,6 +289,12 @@ class Awaitable(collections.abc.Awaitable):
         try:
             self.step(sender, msg)
         except BaseException as err:
+            if getattr(self, 'ready', True): # If self is ready or self doesn't have a ready event
+                # Send ready event to all listeners that have a ready event, but aren't ready yet
+                for listener in self._listeners:
+                    if not getattr(listener, 'ready', True):
+                        listener.ready.send(listener)
+
             # Store result
             if type(err) == StopIteration:
                 self._result = err.value
@@ -307,6 +313,12 @@ class Awaitable(collections.abc.Awaitable):
 
             # Remove awaitable and propagate event
             self._remove(err)
+        else:
+            if getattr(self, 'ready', True): # If self is ready or self doesn't have a ready event
+                # Send ready event to all listeners that have a ready event, but aren't ready yet
+                for listener in self._listeners:
+                    if not getattr(listener, 'ready', True):
+                        listener.ready.send(listener)
 
     def __and__(self, other):
         """Register A & B as shortcut for all_(A, B)
@@ -760,7 +772,7 @@ class Frame(Awaitable):
             try:
                 awaitable = self._generator.send(msg) # Continue coroutine
             except (StopIteration, GeneratorExit): # If frame finished
-                if msg is None: self.ready.send(self) # Send ready event after coroutine ran once
+                if msg is None: self.ready.send(self) # Send ready event if frame finished without ever being awaited
                 raise # Propagate event
             except RuntimeError as err:
                 abc = 0
@@ -768,7 +780,10 @@ class Frame(Awaitable):
                 raise # Propagate event
             else: # If frame awaits awaitable
                 awaitable._listeners.add(self) # Listen to events of awaitable
-                if msg is None: self.ready.send(self) # Send ready event after coroutine ran once
+
+                # Send ready event if not yet ready and awaitable is ready or doesn't have a ready event
+                if getattr(awaitable, 'ready', True) and not self.ready: # If awaitable is ready or awaitable doesn't have a ready event
+                    self.ready.send(self)
 
     def _remove(self, msg):
         """Remove this awaitable from the frame hierarchy.

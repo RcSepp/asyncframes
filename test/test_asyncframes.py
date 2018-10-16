@@ -821,6 +821,35 @@ class TestAsyncFrames(unittest.TestCase):
             0.0: done
         """)
 
+    def test_recursive_ready(self):
+        test = self
+        @Frame
+        async def frame1():
+            @Frame
+            async def frame2():
+                @Frame
+                async def frame3():
+                    @Frame
+                    async def frame4():
+                        test.log.debug('frame4 ready')
+                        await sleep()
+                    test.log.debug('frame3 ready')
+                    await frame4()
+                test.log.debug('frame2 ready')
+                await frame3()
+            test.log.debug('frame1 ready')
+            await frame2()
+        @Frame
+        async def main(self):
+            await frame1().ready
+        test.run_frame(main, expected_log="""
+            0.0: frame1 ready
+            0.0: frame2 ready
+            0.0: frame3 ready
+            0.0: frame4 ready
+            0.0: done
+        """)
+
     def test_free(self):
         test = self
         @Frame
