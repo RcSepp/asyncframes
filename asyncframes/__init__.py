@@ -294,8 +294,8 @@ class Awaitable(collections.abc.Awaitable):
                 # Call exception handler
                 if err != msg:
                     maineventloop = _THREAD_LOCALS._current_eventloop.eventloops[0]
-                    if maineventloop.frame_exception_handler:
-                        maineventloop.frame_exception_handler(err)
+                    if maineventloop.frame_exception_handler and maineventloop.frame_exception_handler(err):
+                        pass
                     elif maineventloop._eventloop_affinity is None or maineventloop._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
                         maineventloop.process(self, err)
                     else:

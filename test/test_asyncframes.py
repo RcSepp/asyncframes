@@ -121,8 +121,9 @@ class TestAsyncFrames(unittest.TestCase):
         # Register event handler for exceptions raised within frames
         def frame_exception_handler(err):
             if isinstance(err, AssertionError):
-                raise err # Raise unittest assertions
+                return False # Raise unittest assertions
             self.log.debug("Frame exception caught: " + repr(err))
+            return True
         self.loop.frame_exception_handler = frame_exception_handler
 
         # Create logger for debugging program flow using time stamped log messages
