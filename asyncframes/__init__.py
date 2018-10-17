@@ -105,6 +105,13 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
             if not mainframe.removed:
                 mainframe._listeners.add(self) # Listen to mainframe finished event
                 self._run()
+        except:
+            raise
+        else:
+            if isinstance(self._result, Exception):
+                raise self._result
+            else:
+                return self._result
         finally:
             _THREAD_LOCALS._current_eventloop = None
             _THREAD_LOCALS._current_frame = None
@@ -117,11 +124,6 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
                     break
             for eventloop in self.eventloops[1:]: eventloop._invoke(0, eventloop._stop, ())
             for worker in workers: self._jointhread(worker)
-
-            if isinstance(self._result, Exception):
-                raise self._result
-            else:
-                return self._result
 
     def _enqueue(self, delay, callback, args, eventloop_affinity=None):
         if len(self.eventloops) == 1: # If running singlethreaded, ...
