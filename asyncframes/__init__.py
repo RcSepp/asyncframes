@@ -86,9 +86,9 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         self.event_queue = queue.Queue()
         def worker_thread(parent_eventloop):
             eventloop = parent_eventloop.__class__()
+            eventloop.event_queue = parent_eventloop.event_queue
             _THREAD_LOCALS._current_eventloop = eventloop
             eventloop_queue.put(eventloop)
-            eventloop.event_queue = parent_eventloop.event_queue
             eventloop._run()
             eventloop._close()
         workers = [self._spawnthread(target=worker_thread, args=(self,)) for i in range(num_threads - 1)]
@@ -453,7 +453,7 @@ class all_(Awaitable):
     """An awaitable that blocks the awaiting frame until all passed awaitables have woken up.
 
     Args:
-        *awaitables (Awaitable[]): A list of all awaitables to await
+        awaitables (Awaitable[]): A list of all awaitables to await
     """
 
     def __init__(self, *awaitables):
@@ -536,7 +536,7 @@ class any_(Awaitable):
     """An awaitable that blocks the awaiting frame until any of the passed awaitables wakes up.
 
     Args:
-        *awaitables (Awaitable[]): A list of all awaitables to await
+        awaitables (Awaitable[]): A list of all awaitables to await
     """
 
     def __init__(self, *awaitables):
@@ -669,8 +669,15 @@ class animate(EventSource):
             else:
                 _THREAD_LOCALS._current_eventloop.postevent(Event(self, self, None), delay=self.interval)
 
+class FrameMeta(abc.ABCMeta):
+    def __new__(mcs, name, bases, dct):
+        frameclass = super().__new__(mcs, name, bases, dct)
+        if bases != (Awaitable,): # If frameclass != Frame, ...
+            frameclass.Factory = type(frameclass.__name__ + '.Factory', (frameclass.Factory,), {}) # Derive factory from base class factory
+        frameclass.Factory.frameclass = frameclass
+        return frameclass
 
-class Frame(Awaitable):
+class Frame(Awaitable, metaclass=FrameMeta):
     """An object within the frame hierarchy.
 
     This class can be used in 2 ways:
@@ -678,23 +685,44 @@ class Frame(Awaitable):
     2) Create a frame class by subclassing `Frame` and instantiate the frame class by annotating a coroutine with `@MyFrameClass`.
     """
 
-    def __new__(cls, *frameclassargs, **frameclasskwargs):
-        def ___new__(framefunc):
-            def create_frame(*frameargs, **framekwargs):
-                if _THREAD_LOCALS._current_eventloop is None:
-                    raise InvalidOperationException("Can't call frame without a running event loop")
-                frame = super(Frame, cls).__new__(cls)
-                frame.__init__(*frameclassargs, **frameclasskwargs)
-                frame.create(framefunc, *frameargs, **framekwargs)
-                return frame
-            return create_frame
+    class Factory(object):
+        """A frame function declared in the context of a frame class.
+        
+        Args:
+            framefunc (Callable): The function or coroutine that describes the frame's behaviour
+            frameclassargs (tuple): Positional arguments to the frame class
+            frameclasskwargs (dict): Keyword arguments to the frame class
+        """
 
+        def __init__(self, framefunc, frameclassargs, frameclasskwargs):
+            self.framefunc = framefunc
+            self.frameclassargs = frameclassargs
+            self.frameclasskwargs = frameclasskwargs
+
+        def __call__(self, *frameargs, **framekwargs):
+            """Produce an instance of the frame.
+            
+            Raises:
+                InvalidOperationException: Raised when no event loop is currently running
+            
+            Returns:
+                Frame: The newly created frame instance
+            """
+
+            if _THREAD_LOCALS._current_eventloop is None:
+                raise InvalidOperationException("Can't call frame without a running event loop")
+            frame = super(Frame, self.__class__.frameclass).__new__(self.__class__.frameclass)
+            frame.__init__(*self.frameclassargs, **self.frameclasskwargs)
+            frame.create(self.framefunc, *frameargs, **framekwargs)
+            return frame
+
+    def __new__(cls, *frameclassargs, **frameclasskwargs):
         if len(frameclassargs) == 1 and not frameclasskwargs and callable(frameclassargs[0]): # If @frame was called without parameters
             framefunc = frameclassargs[0]
             frameclassargs = ()
-            return ___new__(framefunc)
+            return cls.Factory(framefunc, frameclassargs, frameclasskwargs)
         else: # If @frame was called with parameters
-            return ___new__
+            return lambda framefunc: cls.Factory(framefunc, frameclassargs, frameclasskwargs)
 
     def __init__(self, startup_behaviour=FrameStartupBehaviour.delayed):
         super().__init__(self.__class__.__name__)
