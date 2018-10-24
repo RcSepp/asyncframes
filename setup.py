@@ -16,7 +16,7 @@ setuptools.setup(
     name='asyncframes',
     packages=['asyncframes'],
     version=asyncframes.__version__,
-    description='Coroutines for everyone',
+    description='Scalable parallel programming using frame hierarchies',
     long_description=read('README.rst') + '\n\n' + read('CHANGES.rst'),
     author='Sebastian Klaassen',
     author_email='rcsepp@hotmail.com',
