@@ -680,9 +680,37 @@ class FrameMeta(abc.ABCMeta):
 class Frame(Awaitable, metaclass=FrameMeta):
     """An object within the frame hierarchy.
 
-    This class can be used in 2 ways:
-    1) Annotate a coroutine with `@Frame` to use it in the frame hierarchy.
-    2) Create a frame class by subclassing `Frame` and instantiate the frame class by annotating a coroutine with `@MyFrameClass`.
+    This class represents the default frame class. All other frame classes have
+    to be derived from ``Frame``.
+
+    A frame is an instance of a frame class. Use the nested Factory class to
+    create frames.
+
+    The factory class is created by decorating a function or coroutine with
+    ``@FRAME``, where ``FRAME`` is the frame class.
+
+    Example: ::
+
+        class MyFrameClass(Frame):
+            pass
+
+        @MyFrameClass
+        async def my_frame_factory():
+            pass
+
+        assert(type(my_frame_factory) == MyFrameClass.Factory)
+        my_frame = my_frame_factory()
+        assert(type(my_frame) == MyFrameClass)
+
+    Args:
+        startup_behaviour (FrameStartupBehaviour, optional): Defaults to FrameStartupBehaviour.delayed.
+            Controls whether the frame is started immediately or queued on the eventloop.
+        thread_idx (int, optional): Defaults to None. If set, forces the scheduler to affiliate this frame with the given thread.
+
+    Raises:
+        ValueError: If `thread_idx` is outside the range of allocated threads.
+
+            The number of allocated threads is controlled by the `num_threads` parameter of :meth:`AbstractEventLoop.run`.
     """
 
     class Factory(object):
@@ -724,7 +752,9 @@ class Frame(Awaitable, metaclass=FrameMeta):
         else: # If @frame was called with parameters
             return lambda framefunc: cls.Factory(framefunc, frameclassargs, frameclasskwargs)
 
-    def __init__(self, startup_behaviour=FrameStartupBehaviour.delayed):
+    def __init__(self, startup_behaviour=FrameStartupBehaviour.delayed, thread_idx=None):
+        if thread_idx is not None and (thread_idx < 0 or thread_idx >= len(_THREAD_LOCALS._current_eventloop.eventloops)):
+            raise ValueError("thread_idx must be an index between 0 and " + str(len(_THREAD_LOCALS._current_eventloop.eventloops)))
         super().__init__(self.__class__.__name__)
         self.startup_behaviour = startup_behaviour
         self._parent = _THREAD_LOCALS._current_frame
@@ -737,6 +767,8 @@ class Frame(Awaitable, metaclass=FrameMeta):
         self.ready = EventSource(str(self.__name__) + ".ready", True)
         self.free = EventSource(str(self.__name__) + ".free", True)
         self._eventloop_affinity = _THREAD_LOCALS._current_eventloop
+        if thread_idx is not None:
+            self._eventloop_affinity = self._eventloop_affinity.eventloops[thread_idx]
         self._remove_lock = threading.Lock()
 
     def create(self, framefunc, *frameargs, **framekwargs):

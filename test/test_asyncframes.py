@@ -910,6 +910,159 @@ class TestAsyncFrames(unittest.TestCase):
             test.assertEqual(p2.removed, True)
         test.run_frame(main)
 
+    @unittest.skip('Not yet working')
+    def test_send_across_threads(self):
+        test = self
+        @Frame(thread_idx=2)
+        async def frame1(e):
+            print("frame1 (eventloop {}) awaits e".format(get_current_eventloop_index()))
+            await e
+            print("frame1 (eventloop {}) woke up".format(get_current_eventloop_index()))
+            test.log.debug('1')
+        @Frame(thread_idx=3)
+        async def frame2(self, e):
+            print("frame2 (eventloop {}) wakes up e".format(get_current_eventloop_index()))
+            e.send(self)
+            print("frame2 (eventloop {}) continues".format(get_current_eventloop_index()))
+            test.log.debug('2')
+        @Frame
+        async def main(self):
+            print('----------')
+            e = EventSource('my_event')
+            f1 = frame1(e)
+            await f1.ready
+            f2 = frame2(e)
+            await f1
+        test.run_frame(main, expected_log="""
+            0.0: 1
+            0.0: 2
+            0.0: done
+        """)
+
+    @unittest.skip('Not yet working')
+    def test_ready_across_threads(self):
+        test = self
+        @Frame(thread_idx=2)
+        async def frame1():
+            time.sleep(0.1)
+            test.log.debug('2')
+            print(2)
+            await sleep()
+            test.log.debug('4')
+            print(4)
+        @Frame(thread_idx=3)
+        async def frame2(f1):
+            test.log.debug('1')
+            print(1)
+            await f1.ready
+            time.sleep(0.1)
+            test.log.debug('3')
+            print(3)
+        @Frame
+        async def main(self):
+            print('----------')
+            f1 = frame1()
+            await frame2(f1)
+        test.run_frame(main, expected_log="""
+            0.0: 1
+            0.1: 2
+            0.2: 3
+            0.2: 4
+            0.2: done
+        """)
+
+    @unittest.skip('Not yet working')
+    def test_free_across_threads(self):
+        """Test awaiting the free event from a thread different than the one
+        from the removed frame.
+
+        Test status:
+        Deterministic
+
+        Expected behaviour:
+        When frame f1 is to be removed, all code between `await f1.free` and the
+        next await or the end of the frame should be executed before f1 is
+        actually removed. This behaviour allows cleanup code to run before the
+        frame is removed.
+
+        Faced issue:
+        Send is expected to only return once the event has been handled. This
+        does not apply when sending across threads. If the awaiting frame runs
+        on another thread than the sending frame, send() behaves like post(). It
+        would violate the thread-restriction to directly execute the awaiting
+        frame. Instead, it posts the request into the awaiting thread's
+        eventloop and returns before the posted request is handled.
+        """
+
+        test = self
+        @Frame(thread_idx=2)
+        async def frame1():
+            await sleep(0.1)
+            test.log.debug('2')
+            print(2)
+        @Frame(thread_idx=3)
+        async def frame2(f1):
+            test.log.debug('1')
+            print(1)
+            await f1.free
+            time.sleep(0.1)
+            test.log.debug('3 ' + str(f1.removed))
+            print(3, f1.removed)
+        @Frame
+        async def main(self):
+            print('----------')
+            f1 = frame1()
+            await frame2(f1)
+        test.run_frame(main, expected_log="""
+            0.0: 1
+            0.1: 2
+            0.2: 3 False
+            0.2: done
+        """)
+
+    @unittest.skip('Not yet working')
+    def test_delayed_await_free(self):
+        """Test removing a frame before the free event is being awaited.
+
+        Expected behaviour:
+        If a frame is removed, removal is suspended until any frames awaiting
+        the free event of the removed frame await another awaitable or finish.
+        If any awaitables, besides auto-resetting events, are awaited after the
+        event was emitted, they wake up immediately. Accordingly, awaiting free
+        should suspend frame removal, even if free is only awaited after the
+        removal was issued. This behaviour assures that cleanup code is always
+        executed before frame removal, even if the frame was busy while frame
+        removal was initiated.
+        """
+
+        test = self
+        @Frame(thread_idx=2)
+        async def frame1(self):
+            await sleep(0.1)
+            test.log.debug('2')
+            print(2)
+            await self.free
+            test.log.debug('3')
+            print(3)
+        @Frame(thread_idx=3)
+        async def frame2(f1):
+            test.log.debug('1')
+            print(1)
+            f1.remove()
+            test.log.debug('4 ' + str(f1.removed))
+            print(4, f1.removed)
+        @Frame
+        async def main(self):
+            print('----------')
+            f1 = frame1()
+            await frame2(f1)
+        test.run_frame(main, expected_log="""
+            0.0: 1
+            0.1: 2
+            0.2: 3 False
+            0.2: done
+        """)
+
     def test_thread_independence(self):
         test = self
         errors = queue.Queue()
