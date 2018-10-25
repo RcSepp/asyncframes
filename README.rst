@@ -2,8 +2,7 @@
 asyncframes - Parallel programming for software engineers
 =========================================================
 
-.. image:: https://travis-ci.org/RcSepp/asyncframes.svg?branch=master
-    :target: https://travis-ci.org/RcSepp/asyncframes
+|travis_badge| |readthedocs_badge|
 
 Code repository: https://github.com/RcSepp/asyncframes
 

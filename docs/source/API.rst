@@ -2,7 +2,7 @@ API
 ===
 
 asyncframes module
----------------
+------------------
 
 .. automodule:: asyncframes
     :members:

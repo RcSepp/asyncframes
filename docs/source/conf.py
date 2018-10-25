@@ -13,6 +13,7 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
 import os
+import re
 import sys
 sys.path.insert(0, os.path.abspath('../../.'))
 import asyncframes
@@ -71,6 +72,16 @@ exclude_patterns = []
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'sphinx'
+
+# A string of reStructuredText that will be included at the end of every source
+# file that is read.
+rst_epilog = """
+.. |travis_badge| image:: https://travis-ci.org/RcSepp/asyncframes.svg?branch={git_branch}
+    :target: https://travis-ci.org/RcSepp/asyncframes
+.. |readthedocs_badge| image:: https://readthedocs.org/projects/asyncframes/badge/?version={git_branch}
+    :target: https://asyncframes.readthedocs.io/en/{git_branch}/?badge={git_branch}
+    :alt: Documentation Status
+""".format(git_branch=re.match(r"ref: refs\/heads\/(.*)", open("../../.git/HEAD", 'r').readline()).groups(1)[0])
 
 
 # -- Options for HTML output -------------------------------------------------
