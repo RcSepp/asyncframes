@@ -37,7 +37,7 @@ class InvalidOperationException(Exception):
     """Raised when operations are performed out of context.
 
     Args:
-        msg (str): Human readable string describing the exception
+        msg (str): Human readable string describing the exception.
     """
 
     def __init__(self, msg):
@@ -212,7 +212,7 @@ class Awaitable(collections.abc.Awaitable):
     a result, that gets set when the awaitable finishes.
 
     Args:
-        name (str): The name of the awaitable
+        name (str): The name of the awaitable.
     """
 
     def __init__(self, name):
@@ -291,8 +291,8 @@ class Awaitable(collections.abc.Awaitable):
         """Propagate an event from its source and along awaiting nodes through the frame hierarchy.
 
         Args:
-            sender (Awaitable): The source of the event or an awaited node that woke up
-            msg: The incomming event or propagated message
+            sender (Awaitable): The source of the event or an awaited node that woke up.
+            msg: The incomming event or propagated message.
         """
 
         _THREAD_LOCALS._current_frame = self # Activate self
@@ -334,10 +334,10 @@ class Awaitable(collections.abc.Awaitable):
         """Register A & B as shortcut for all_(A, B)
 
         Args:
-            other (Awaitable): The other awaitable
+            other (Awaitable): The other awaitable.
 
         Returns:
-            all_: A frame awaiting `self` and `other`
+            all_: A frame awaiting `self` and `other`.
         """
 
         return all_(self, other)
@@ -345,10 +345,10 @@ class Awaitable(collections.abc.Awaitable):
         """Register A | B as shortcut for any_(A, B)
 
         Args:
-            other (Awaitable): The other awaitable
+            other (Awaitable): The other awaitable.
 
         Returns:
-            any_: A frame awaiting `self` and `other`
+            any_: A frame awaiting `self` and `other`.
         """
 
         return any_(self, other)
@@ -362,8 +362,8 @@ class EventSource(Awaitable):
     Event sources represent leave nodes in the frame hierarchy.
 
     Args:
-        name (str): The name of the event
-        autoremove (bool, optional): Defaults to False. If `True`, removes the source after it has been resumed by an event
+        name (str): The name of the event.
+        autoremove (bool, optional): Defaults to False. If `True`, removes the source after it has been resumed by an event.
     """
 
     def __init__(self, name, autoremove=False):
@@ -400,11 +400,11 @@ class EventSource(Awaitable):
         """Handle incoming events.
 
         Args:
-            sender (EventSource): The source of the event. This value is always identical to `self`
-            msg (Event): The incomming event
+            sender (EventSource): The source of the event. This value is always identical to `self`.
+            msg (Event): The incomming event.
 
         Raises:
-            StopIteration: If the incoming event should wake up awaiting frames, raise a StopIteration with `value` set to the event
+            StopIteration: If the incoming event should wake up awaiting frames, raise a StopIteration with `value` set to the event.
         """
 
         stop = StopIteration()
@@ -415,8 +415,8 @@ class EventSource(Awaitable):
         """Dispatch and immediately process an event.
 
         Args:
-            sender: The entity triggering the event, for example, the button instance on a button-press event
-            args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event
+            sender: The entity triggering the event, for example, the button instance on a button-press event.
+            args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event.
         """
 
         _THREAD_LOCALS._current_eventloop.sendevent(Event(sender, self, args))
@@ -425,9 +425,9 @@ class EventSource(Awaitable):
         """Enqueue an event in the event loop.
 
         Args:
-            sender: The entity triggering the event, for example, the button instance on a button-press event
-            args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event
-            delay (float, optional): Defaults to 0. The time in seconds to wait before posting the event
+            sender: The entity triggering the event, for example, the button instance on a button-press event.
+            args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event.
+            delay (float, optional): Defaults to 0. The time in seconds to wait before posting the event.
         """
 
         (_THREAD_LOCALS._current_eventloop or self.eventloop).postevent(Event(sender, self, args), delay)
@@ -436,9 +436,9 @@ class Event():
     """Data structure, containing information about the occurance of an event.
 
     Args:
-        sender: The entity triggering the event, for example, the button instance on a button-press event
-        source (EventSource): The awaitable class that dispached this event
-        args: Event arguments, for example, the progress value on a progress-update event
+        sender: The entity triggering the event, for example, the button instance on a button-press event.
+        source (EventSource): The awaitable class that dispached this event.
+        args: Event arguments, for example, the progress value on a progress-update event.
     """
 
     def __init__(self, sender, source, args):
@@ -453,7 +453,7 @@ class all_(Awaitable):
     """An awaitable that blocks the awaiting frame until all passed awaitables have woken up.
 
     Args:
-        awaitables (Awaitable[]): A list of all awaitables to await
+        awaitables (Awaitable[]): A list of all awaitables to await.
     """
 
     def __init__(self, *awaitables):
@@ -486,12 +486,12 @@ class all_(Awaitable):
         """Respond to an awaking child.
 
         Args:
-            sender (Awaitable): The awaking child
-            msg (BaseException): A StopIteration exception with the awaking child's result or an exception raised in a child frame
+            sender (Awaitable): The awaking child.
+            msg (BaseException): A StopIteration exception with the awaking child's result or an exception raised in a child frame.
 
         Raises:
-            StopIteration: Once all children woke up, this raises a StopIteration with `value` set to a dict of all children's results
-            BaseException: If msg is an Exception other than GeneratorExit or StopIteration, the exception is re-raised
+            StopIteration: Once all children woke up, this raises a StopIteration with `value` set to a dict of all children's results.
+            BaseException: If msg is an Exception other than GeneratorExit or StopIteration, the exception is re-raised.
         """
 
         if isinstance(msg, BaseException):
@@ -536,7 +536,7 @@ class any_(Awaitable):
     """An awaitable that blocks the awaiting frame until any of the passed awaitables wakes up.
 
     Args:
-        awaitables (Awaitable[]): A list of all awaitables to await
+        awaitables (Awaitable[]): A list of all awaitables to await.
     """
 
     def __init__(self, *awaitables):
@@ -561,12 +561,12 @@ class any_(Awaitable):
         """Respond to an awaking child.
 
         Args:
-            sender (Awaitable): The awaking child
-            msg (BaseException): A StopIteration exception with the awaking child's result or an exception raised in a child frame
+            sender (Awaitable): The awaking child.
+            msg (BaseException): A StopIteration exception with the awaking child's result or an exception raised in a child frame.
 
         Raises:
-            StopIteration: If msg indicates an awaking child, store its result as this frame's result
-            BaseException: Forward any exceptions
+            StopIteration: If msg indicates an awaking child, store its result as this frame's result.
+            BaseException: Forward any exceptions.
         """
 
         if isinstance(msg, BaseException):
@@ -576,7 +576,7 @@ class any_(Awaitable):
         """Remove this awaitable from the frame hierarchy.
 
         Returns:
-            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
+            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before.
         """
 
         if self.removed:
@@ -606,7 +606,7 @@ class sleep(EventSource):
     This is useful to implement non-blocking loops.
 
     Args:
-        seconds (float, optional): Defaults to 0. The duration to wait
+        seconds (float, optional): Defaults to 0. The duration to wait.
     """
 
     def __init__(self, seconds=0.0):
@@ -633,9 +633,9 @@ class animate(EventSource):
     """An awaitable used for periodically calling a callback function for the specified amount of time.
 
     Args:
-        seconds (float): The duration of the animation
-        callback (Callable[float, None]): The function to be called on every iteration. The first parameter of `callback` indicates animation progress between 0 and 1
-        interval (float, optional): Defaults to 0.0. The minimum time in seconds between two consecutive calls of the callback
+        seconds (float): The duration of the animation.
+        callback (Callable[float, None]): The function to be called on every iteration. The first parameter of `callback` indicates animation progress between 0 and 1.
+        interval (float, optional): Defaults to 0.0. The minimum time in seconds between two consecutive calls of the callback.
     """
 
     def __init__(self, seconds, callback, interval=0.0):
@@ -717,9 +717,9 @@ class Frame(Awaitable, metaclass=FrameMeta):
         """A frame function declared in the context of a frame class.
         
         Args:
-            framefunc (Callable): The function or coroutine that describes the frame's behaviour
-            frameclassargs (tuple): Positional arguments to the frame class
-            frameclasskwargs (dict): Keyword arguments to the frame class
+            framefunc (Callable): The function or coroutine that describes the frame's behaviour.
+            frameclassargs (tuple): Positional arguments to the frame class.
+            frameclasskwargs (dict): Keyword arguments to the frame class.
         """
 
         def __init__(self, framefunc, frameclassargs, frameclasskwargs):
@@ -731,10 +731,10 @@ class Frame(Awaitable, metaclass=FrameMeta):
             """Produce an instance of the frame.
             
             Raises:
-                InvalidOperationException: Raised when no event loop is currently running
+                InvalidOperationException: Raised when no event loop is currently running.
             
             Returns:
-                Frame: The newly created frame instance
+                Frame: The newly created frame instance.
             """
 
             if _THREAD_LOCALS._current_eventloop is None:
@@ -812,13 +812,13 @@ class Frame(Awaitable, metaclass=FrameMeta):
         """Resume the frame coroutine.
 
         Args:
-            sender (Awaitable): The resumed awaitable
-            msg (BaseException): A message to be forwarded to the coroutine or None to start the coroutine
+            sender (Awaitable): The resumed awaitable.
+            msg (BaseException): A message to be forwarded to the coroutine or None to start the coroutine.
 
         Raises:
-            StopIteration: Raised if the coroutine finished with a result
-            GeneratorExit: Raised if the coroutine finished without a result
-            Exception: Raised if the coroutine encountered an error
+            StopIteration: Raised if the coroutine finished with a result.
+            GeneratorExit: Raised if the coroutine finished without a result.
+            Exception: Raised if the coroutine encountered an error.
         """
 
         if self.removed:
@@ -918,11 +918,11 @@ class Primitive(object):
     If it is created within a child frame, it will still be registered with the closest parent of the owning frame class.
 
     Args:
-        owner (class): The owning frame class
+        owner (class): The owning frame class.
 
     Raises:
-        TypeError: Raised if owner is not a frame class
-        Exception: Raised if a primitive is created outside the frame function of its owning frame class
+        TypeError: Raised if owner is not a frame class.
+        Exception: Raised if a primitive is created outside the frame function of its owning frame class.
     """
 
     def __init__(self, owner):
