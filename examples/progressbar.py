@@ -49,7 +49,7 @@ async def sigint_listener(self):
     # Register a custom handler for the SIGINT signal
     sigint = EventSource('sigint')
     original_sigint_handler = signal.getsignal(signal.SIGINT)
-    signal.signal(signal.SIGINT, lambda s, f: sigint.invoke(None))
+    signal.signal(signal.SIGINT, lambda s, f: sigint.post(None))
 
     # Wait until either the SIGINT signal was fired or this frame was manually removed
     await (self.free | sigint)

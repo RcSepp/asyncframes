@@ -13,7 +13,7 @@ class Thread(threading.Thread):
         self.event = EventSource('Thread.event')
     def run(self):
         time.sleep(1)
-        self.event.invoke(self)
+        self.event.post(self)
 
 @Frame
 async def print_dots():
