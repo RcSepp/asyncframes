@@ -4,18 +4,17 @@
 
 import datetime
 import io
-import linecache
 import logging
 import math
 import threading
 import queue
 import re
-import sys
 import time
 import unittest
 import asyncframes
 from asyncframes import *
 from asyncframes import _THREAD_LOCALS
+import line_tracer
 
 # Uncomment the following line to run all tests using PFrames
 # Frame = PFrame
@@ -29,90 +28,23 @@ NUM_ITERATIONS = 1
 NUM_THREADS = 0
 
 # If true, any exceptions during an iteration of a test case will print a full line-by-line trace of the executed test
-USE_TRACE = False
+USE_TRACER = False
+TRACE_OUTPUT = "./trace.txt" # Output file for trace output or None to print to standard output
+TRACE_MODE = line_tracer.Trace.Mode.on_error
 
 
-
-
-
-class Trace(object):
-    BASE_DIR = "/home/sepp/Development/Python/asyncframes/"
-    SKIP_FILES = set([
-        "asyncframes/asyncio_eventloop.py",
-        "asyncframes/pyqt5_eventloop.py",
-        #"asyncframes/__init__.py"
-    ])
-    SKIP_FUNCTIONS = {
-        "test/test_asyncframes.py": set([
-            "TimedFormatter.format"
-        ]),
-        "asyncframes/__init__.py": set([
-            "worker_thread",
-            "EventLoop.__init__",
-            "EventLoop._spawnthread",
-            "EventLoop.<listcomp>",
-            "Frame.__init__",
-            "EventSource.__init__",
-            "Event.__init__",
-            "Frame.removed"
-        ])
-    }
-    def __init__(self):
-        self.trace_depth = 0
-        self.trace_stream = io.StringIO()
-
-    def _trace(self, frame, event, arg):
-        filename = frame.f_code.co_filename
-        #if 'asyncframes' not in filename:
-        if not filename.startswith(Trace.BASE_DIR):
-            return self._trace
-
-        fname = filename[len(Trace.BASE_DIR):]
-        if fname in Trace.SKIP_FILES:
-            return self._trace
-
-        coname = frame.f_code.co_name
-        if 'self' in frame.f_locals:
-            coname = frame.f_locals['self'].__class__.__name__ + '.' + coname
-        if fname in Trace.SKIP_FUNCTIONS and coname in Trace.SKIP_FUNCTIONS[fname]:
-            return self._trace
-
-        if event == "line":
-            lineno = frame.f_lineno
-            line = linecache.getline(filename, lineno).lstrip()
-            threadno = get_current_eventloop_index()
-            #self.trace_stream.write('thread {} | "{}", line {}, in {}:'.format(threadno, fname, lineno, coname).ljust(80) + line)
-            print('thread {} | "{}", line {}, in {}:'.format(threadno, fname, lineno, coname).ljust(80) + line, end='')
-            if getattr(_THREAD_LOCALS, '_current_frame', None) and \
-               _THREAD_LOCALS._current_frame._eventloop_affinity and \
-               _THREAD_LOCALS._current_frame._eventloop_affinity != _THREAD_LOCALS._current_eventloop and \
-               fname == "test/test_asyncframes.py":
-                raise AssertionError('eventloop affinity error: thread {} | "{}", line {}, in {}: {}'.format(threadno, fname, lineno, coname, line))
-        return self._trace
-
-    def run(self, func, *args, **kwds):
-        if USE_TRACE:
-            self.trace_stream.truncate(0) # Reset trace
-            self.trace_stream.seek(0) # Reset trace
-            sys.settrace(self._trace) # Enable trace
-            threading.settrace(self._trace) # Enable trace
-            try:
-                result = func(*args, **kwds)
-            finally:
-                sys.settrace(None) # Disable trace
-                threading.settrace(None) # Disable trace
-                self.print() #DELETE
-            return result
-        else:
-            return func(*args, **kwds)
+class nullcontext(object):
+    """A context manager that does nothing.
     
-    def print(self):
-        print(self.trace_stream.getvalue())
-
-
-
-
-
+    See https://docs.python.org/3/library/contextlib.html#contextlib.nullcontext
+    Implemented here for Python versions before 3.7
+    """
+    def __init__(self, enter_result=None):
+        self.enter_result = enter_result
+    def __enter__(self):
+        return self.enter_result
+    def __exit__(self, exc_type, exc_value, traceback):
+        return
 
 class MyFrame(Frame):
     @staticmethod
@@ -181,30 +113,28 @@ class TestAsyncFrames(unittest.TestCase):
             self.logstream.seek(0) # Reset log
             self.logformatter.starttime = datetime.datetime.now() # Reset log start time
             await frame(*frameargs)
-        t = Trace()
-        for i in range(NUM_ITERATIONS):
-            try:
-                t.run(self.loop.run, mainframe, num_threads=NUM_THREADS)
-                self.log.debug('done')
-                if expected_log is not None:
-                    # Compare log with expected_log
-                    expected = '\n'.join(line.strip() for line in expected_log.strip('\n').split('\n')) # Remove leading and trailing empty lines and white space
-                    self.assertEqual(expected, self.logstream.getvalue())
-            except Exception as err:
-                if assert_raises:
-                    failed = type(err) != assert_raises
-                elif assert_raises_regex:
-                    failed = type(err) != assert_raises_regex[0] or not re.match(assert_raises_regex[1], str(err))
+        cm = line_tracer.Trace(line_tracer.Trace.Mode.on_error, TRACE_OUTPUT, True) if USE_TRACER else nullcontext()
+        for _ in range(NUM_ITERATIONS):
+            with cm:
+                try:
+                    self.loop.run(mainframe, num_threads=NUM_THREADS)
+                    self.log.debug('done')
+                    if expected_log is not None:
+                        # Compare log with expected_log
+                        expected = '\n'.join(line.strip() for line in expected_log.strip('\n').split('\n')) # Remove leading and trailing empty lines and white space
+                        self.assertEqual(expected, self.logstream.getvalue())
+                except Exception as err:
+                    if assert_raises:
+                        failed = type(err) != assert_raises
+                    elif assert_raises_regex:
+                        failed = type(err) != assert_raises_regex[0] or not re.match(assert_raises_regex[1], str(err))
+                    else:
+                        failed = True
+                    if failed:
+                        raise
                 else:
-                    failed = True
-                if failed:
-                    print(err)
-                    t.print()
-                    raise
-            else:
-                if assert_raises or assert_raises_regex:
-                    t.print()
-                    raise AssertionError((assert_raises or assert_raises_regex).__name__ + " not raised")
+                    if assert_raises or assert_raises_regex:
+                        raise AssertionError((assert_raises or assert_raises_regex).__name__ + " not raised")
 
     def test_simple(self):
         test = self
