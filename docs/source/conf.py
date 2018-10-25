@@ -12,8 +12,8 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-import os
-import re
+import git
+import os.path
 import sys
 sys.path.insert(0, os.path.abspath('../../.'))
 import asyncframes
@@ -81,7 +81,7 @@ rst_epilog = """
 .. |readthedocs_badge| image:: https://readthedocs.org/projects/asyncframes/badge/?version={git_branch}
     :target: https://asyncframes.readthedocs.io/en/{git_branch}/?badge={git_branch}
     :alt: Documentation Status
-""".format(git_branch=re.match(r"ref: refs\/heads\/(.*)", open("../../.git/HEAD", 'r').readline()).groups(1)[0])
+""".format(git_branch=git.Repo(os.path.split(__file__)[0], search_parent_directories=True).head.ref.name)
 
 
 # -- Options for HTML output -------------------------------------------------
