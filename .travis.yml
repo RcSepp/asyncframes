@@ -13,6 +13,7 @@ install:
 script:
   - export ASYNCFRAMES_SRC=`pwd`/asyncframes
   - cd test
-  - xvfb-run python3 -m coverage run --source=$ASYNCFRAMES_SRC test_asyncframes.py
+  - echo $ASYNCFRAMES_SRC
+  - xvfb-run python3 -m coverage run --debug=trace --source=$ASYNCFRAMES_SRC test_asyncframes.py
 after_success:
   - coveralls

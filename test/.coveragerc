@@ -1,7 +1,0 @@
-[run]
-source = ../asyncframes
-
-[report]
-exclude_lines =
-	pragma: no cover
-	pass
