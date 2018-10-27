@@ -11,6 +11,6 @@ install:
   - pip install coverage
   - pip install python-coveralls
 script:
-  - cd test; xvfb-run python3 -m coverage run test_asyncframes.py
+  - cd test; xvfb-run python3 -m coverage run --debug=trace test_asyncframes.py
 after_success:
-  - cd test; python3 -m coveralls
+  - coveralls
