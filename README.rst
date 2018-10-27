@@ -19,6 +19,8 @@ asyncframes - Parallel programming for software engineers
 .. |travis_v2| image:: https://img.shields.io/travis/RcSepp/asyncframes/dev.svg?logo=travis
     :target: https://travis-ci.org/RcSepp/asyncframes
 
+.. |coverage_v1| image:: https://coveralls.io/repos/github/RcSepp/asyncframes/badge.svg?branch=master
+    :target: https://coveralls.io/github/RcSepp/asyncframes?branch=master
 .. |coverage_v2| image:: https://coveralls.io/repos/github/RcSepp/asyncframes/badge.svg?branch=dev
     :target: https://coveralls.io/github/RcSepp/asyncframes?branch=dev
 
@@ -31,9 +33,9 @@ asyncframes - Parallel programming for software engineers
 Version   asyncframes v1                           asyncframes v2                          
 ========= ======================================== ========================================
 Docs                                               |rtd_v2|                                
-Download  |pypi_v1|                                                                        
+Download  |pypi_v1|                                *unreleased*                            
 Source    |github_v1|                              |github_v2|                             
-Status    |travis_v1|                              |travis_v2| |coverage_v2|               
+Status    |travis_v1| |coverage_v1|                |travis_v2| |coverage_v2|               
 License   |license_v1|                             |license_v2|                            
 ========= ======================================== ========================================
 
