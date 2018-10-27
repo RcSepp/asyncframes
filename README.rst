@@ -2,11 +2,37 @@
 asyncframes - Parallel programming for software engineers
 =========================================================
 
-|travis_badge| |readthedocs_badge|
+.. |rtd_v2| image:: https://img.shields.io/readthedocs/asyncframes/dev.svg?logo=Read%20the%20Docs
+    :target: https://asyncframes.readthedocs.io/en/dev/?badge=dev
+    :alt: Documentation Status
 
-Code repository: https://github.com/RcSepp/asyncframes
+.. |pypi_v1| image:: https://img.shields.io/badge/pypi-v1.1-blue.svg
+    :target: https://pypi.org/project/asyncframes/
 
-Python Package Index: https://pypi.org/project/asyncframes/
+.. |github_v1| image:: https://img.shields.io/badge/github-master-brightgreen.svg?style=social&logo=github
+    :target: https://github.com/RcSepp/asyncframes/tree/master
+.. |github_v2| image:: https://img.shields.io/badge/github-dev-brightgreen.svg?style=social&logo=github
+    :target: https://github.com/RcSepp/asyncframes/tree/dev
+
+.. |travis_v1| image:: https://img.shields.io/travis/RcSepp/asyncframes/master.svg?logo=travis
+    :target: https://travis-ci.org/RcSepp/asyncframes
+.. |travis_v2| image:: https://img.shields.io/travis/RcSepp/asyncframes/dev.svg?logo=travis
+    :target: https://travis-ci.org/RcSepp/asyncframes
+
+.. |license_v1| image:: https://img.shields.io/badge/License-MIT-brightgreen.svg
+    :target: https://opensource.org/licenses/MIT
+.. |license_v2| image:: https://img.shields.io/badge/License-MIT-brightgreen.svg
+    :target: https://opensource.org/licenses/MIT
+
+========= ======================================== ========================================
+Version   asyncframes v1                           asyncframes v2                          
+========= ======================================== ========================================
+Docs                                               |rtd_v2|                                
+Download  |pypi_v1|                                                                        
+Source    |github_v1|                              |github_v2|                             
+Status    |travis_v1|                              |travis_v2|                             
+License   |license_v1|                             |license_v2|                            
+========= ======================================== ========================================
 
 ----
 
