@@ -19,6 +19,9 @@ asyncframes - Parallel programming for software engineers
 .. |travis_v2| image:: https://img.shields.io/travis/RcSepp/asyncframes/dev.svg?logo=travis
     :target: https://travis-ci.org/RcSepp/asyncframes
 
+.. |coverage_v2| image:: https://coveralls.io/repos/github/RcSepp/asyncframes/badge.svg?branch=dev
+    :target: https://coveralls.io/github/RcSepp/asyncframes?branch=dev
+
 .. |license_v1| image:: https://img.shields.io/badge/License-MIT-brightgreen.svg
     :target: https://opensource.org/licenses/MIT
 .. |license_v2| image:: https://img.shields.io/badge/License-MIT-brightgreen.svg
@@ -30,7 +33,7 @@ Version   asyncframes v1                           asyncframes v2
 Docs                                               |rtd_v2|                                
 Download  |pypi_v1|                                                                        
 Source    |github_v1|                              |github_v2|                             
-Status    |travis_v1|                              |travis_v2|                             
+Status    |travis_v1|                              |travis_v2| |coverage_v2|               
 License   |license_v1|                             |license_v2|                            
 ========= ======================================== ========================================
 
