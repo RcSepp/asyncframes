@@ -13,4 +13,4 @@ install:
 script:
   - cd test; xvfb-run python3 -m coverage run test_asyncframes.py
 after_success:
-  - python3 -m coveralls
+  - cd test; python3 -m coveralls
