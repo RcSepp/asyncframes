@@ -11,7 +11,7 @@ install:
   - pip install coverage
   - pip install python-coveralls
 script:
-  - export ASYNCFRAMES_SRC=`pwd`/asyncframes
+  - export ASYNCFRAMES_SRC=`python3 -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())"`
   - cd test
   - echo $ASYNCFRAMES_SRC
   - xvfb-run python3 -m coverage run --debug=trace --source=$ASYNCFRAMES_SRC test_asyncframes.py
