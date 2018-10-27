@@ -2,8 +2,8 @@ language: python
 dist: xenial
 sudo: true
 python:
-  - "3.5"
-  - "3.6"
+# - "3.5"
+# - "3.6"
   - "3.7"
 install:
   - pip install pyqt5
@@ -11,6 +11,8 @@ install:
   - pip install coverage
   - pip install python-coveralls
 script:
-  - cd test; xvfb-run python3 -m coverage run --source=`pwd`/../asyncframes test_asyncframes.py
+  - export ASYNCFRAMES_SRC=`pwd`/asyncframes
+  - cd test
+  - xvfb-run python3 -m coverage run --source=$ASYNCFRAMES_SRC test_asyncframes.py
 after_success:
   - coveralls
