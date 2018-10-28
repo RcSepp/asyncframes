@@ -3,6 +3,7 @@
 # Distributed under the MIT License. See LICENSE file for more info.
 
 import abc
+import collections
 import collections.abc
 import datetime
 import enum
@@ -431,21 +432,21 @@ class all_(Awaitable):
         super().__init__("all({})".format(", ".join(str(a) for a in awaitables)))
         self._remove_lock = threading.Lock()
 
-        self._awaitables = set()
-        self._result = {}
-        for awaitable in awaitables:
+        self._awaitables = collections.defaultdict(list)
+        self._result = [None] * len(awaitables)
+        for i, awaitable in enumerate(awaitables):
             if awaitable.removed:
                 if isinstance(awaitable._result, Exception):
                     self._result = awaitable._result
                     super()._remove(self._result)
                     return
                 else:
-                    self._result[awaitable] = awaitable._result
+                    self._result[i] = awaitable._result
             else:
-                self._awaitables.add(awaitable)
+                self._awaitables[awaitable].append(i)
                 awaitable._listeners.add(self)
 
-        if len(self._result) == len(awaitables):
+        if not self._awaitables:
             super()._remove(self._result)
             return
 
@@ -466,11 +467,13 @@ class all_(Awaitable):
         """
 
         if isinstance(msg, BaseException):
-            self._awaitables.discard(sender)
             if type(msg) == StopIteration:
-                self._result[sender] = msg.value
-            elif type(msg) != GeneratorExit:
-                raise msg
+                for i in self._awaitables.pop(sender, ()):
+                    self._result[i] = msg.value
+            else:
+                self._awaitables.pop(sender, None)
+                if type(msg) != GeneratorExit:
+                    raise msg
 
         if not self._awaitables:
             stop = StopIteration()

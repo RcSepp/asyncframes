@@ -496,17 +496,16 @@ class TestAsyncFrames(unittest.TestCase):
             await sleep(0.2)
             await s
             test.log.debug(await w)
-            test.log.debug((await (s | w))[0])
-            s_and_w = await (s & w)
-            for k in sorted(s_and_w):
-                v = s_and_w[k]
-                test.log.debug("{}: {}".format(k, v))
+            awaitable_repr = Awaitable.__repr__
+            Awaitable.__repr__ = Awaitable.__str__
+            test.log.debug(await (s | w))
+            test.log.debug(await (s & w))
+            Awaitable.__repr__ = awaitable_repr
         test.run_frame(main, expected_log="""
             0.1: 1
             0.2: some result
-            0.2: sleep(0.1)
-            0.2: sleep(0.1): None
-            0.2: wait: some result
+            0.2: (sleep(0.1), None)
+            0.2: [None, 'some result']
             0.2: done
         """)
 
@@ -705,7 +704,7 @@ class TestAsyncFrames(unittest.TestCase):
             test.log.debug('1')
             test.assertEqual((await (s2 | s3))[0], s2)
             test.log.debug('2')
-            test.assertEqual((await (s2 & s3)).keys(), set([s2, s3]))
+            test.assertEqual(await (s2 & s3), [None, None])
             test.log.debug('3')
             await s1
             await s2
