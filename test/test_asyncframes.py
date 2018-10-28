@@ -493,21 +493,19 @@ class TestAsyncFrames(unittest.TestCase):
         async def main():
             s = sleep(0.1)
             w = wait(test, 0.1, '1')
-            test.log.debug((await sleep(0.2)).source)
-            test.log.debug((await s).source)
+            await sleep(0.2)
+            await s
             test.log.debug(await w)
-            test.log.debug((await (s | w)).source)
+            test.log.debug((await (s | w))[0])
             s_and_w = await (s & w)
             for k in sorted(s_and_w):
                 v = s_and_w[k]
                 test.log.debug("{}: {}".format(k, v))
         test.run_frame(main, expected_log="""
             0.1: 1
-            0.2: sleep(0.2)
-            0.2: sleep(0.1)
             0.2: some result
             0.2: sleep(0.1)
-            0.2: sleep(0.1): sleep(0.1)
+            0.2: sleep(0.1): None
             0.2: wait: some result
             0.2: done
         """)
@@ -521,24 +519,24 @@ class TestAsyncFrames(unittest.TestCase):
             send_event(0.1, ae)
             send_event(0.2, ae)
             e = await ae
-            test.log.debug("'%s' raised '%s' with args '%s'", e.sender, e.source, e.args)
+            test.log.debug("'%s' raised '%s' with args '%s'", e.sender, ae, e.args)
             e = await ae
-            test.log.debug("'%s' reraised '%s' with args '%s'", e.sender, e.source, e.args)
+            test.log.debug("'%s' reraised '%s' with args '%s'", e.sender, ae, e.args)
 
             post_event(0.1, ae)
             ae.post(self, 'my event args', 0.2)
             e = await ae
-            test.log.debug("'%s' raised '%s' with args '%s'", e.sender, e.source, e.args)
+            test.log.debug("'%s' raised '%s' with args '%s'", e.sender, ae, e.args)
             e = await ae
-            test.log.debug("'%s' reraised '%s' with args '%s'", e.sender, e.source, e.args)
+            test.log.debug("'%s' reraised '%s' with args '%s'", e.sender, ae, e.args)
 
             if test.supports_invoke:
                 threading.Thread(target=invoke_event, args=(0.1, ae)).start()
                 threading.Thread(target=ae.post, args=(self, 'my event args', 0.2)).start()
                 e = await ae
-                test.log.debug("'%s' raised '%s' with args '%s'", e.sender, e.source, e.args)
+                test.log.debug("'%s' raised '%s' with args '%s'", e.sender, ae, e.args)
                 e = await ae
-                test.log.debug("'%s' reraised '%s' with args '%s'", e.sender, e.source, e.args)
+                test.log.debug("'%s' reraised '%s' with args '%s'", e.sender, ae, e.args)
             else:
                 await sleep(0.1)
                 test.log.debug("'invoke_event' raised 'my event' with args 'my event args'")
@@ -703,11 +701,11 @@ class TestAsyncFrames(unittest.TestCase):
             s1 = sleep(0.1)
             s2 = sleep(0.2)
             s3 = sleep(0.3)
-            test.assertEqual((await (s1 | s2)).source, s1)
+            test.assertEqual((await (s1 | s2))[0], s1)
             test.log.debug('1')
-            test.assertEqual((await (s2 | s3)).source, s2)
+            test.assertEqual((await (s2 | s3))[0], s2)
             test.log.debug('2')
-            test.assertEqual(set([v.source for v in (await (s2 & s3)).values()]), set([s2, s3]))
+            test.assertEqual((await (s2 & s3)).keys(), set([s2, s3]))
             test.log.debug('3')
             await s1
             await s2
