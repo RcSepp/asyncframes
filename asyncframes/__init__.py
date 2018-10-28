@@ -16,7 +16,7 @@ import warnings
 
 
 __all__ = [
-    'all_', 'animate', 'any_', 'Awaitable', 'AbstractEventLoop', 'Event', 'EventSource',
+    'all_', 'animate', 'any_', 'Awaitable', 'AbstractEventLoop', 'EventSource',
     'find_parent', 'Frame', 'FrameStartupBehaviour', 'get_current_eventloop_index',
     'InvalidOperationException', 'hold', 'PFrame', 'Primitive', 'sleep'
 ]
@@ -389,7 +389,7 @@ class EventSource(Awaitable):
 
         Args:
             sender (EventSource): The source of the event. This value is always identical to `self`.
-            msg (Event): The incomming event.
+            msg: The incomming event arguments.
 
         Raises:
             StopIteration: If the incoming event should wake up awaiting frames, raise a StopIteration with `value` set to the event.
@@ -399,7 +399,7 @@ class EventSource(Awaitable):
         stop.value = msg
         raise stop
 
-    def send(self, sender, args=None):
+    def send(self, args=None):
         """Dispatch and immediately process an event.
 
         Args:
@@ -407,9 +407,9 @@ class EventSource(Awaitable):
             args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event.
         """
 
-        _THREAD_LOCALS._current_eventloop.sendevent(self, Event(sender, args))
+        _THREAD_LOCALS._current_eventloop.sendevent(self, args)
 
-    def post(self, sender, args=None, delay=0):
+    def post(self, args=None, delay=0):
         """Enqueue an event in the event loop.
 
         Args:
@@ -418,22 +418,7 @@ class EventSource(Awaitable):
             delay (float, optional): Defaults to 0. The time in seconds to wait before posting the event.
         """
 
-        (_THREAD_LOCALS._current_eventloop or self.eventloop).postevent(self, Event(sender, args), delay)
-
-class Event():
-    """Data structure, containing information about the occurance of an event.
-
-    Args:
-        sender: The entity triggering the event, for example, the button instance on a button-press event.
-        args: Event arguments, for example, the progress value on a progress-update event.
-    """
-
-    def __init__(self, sender, args):
-        self.sender = sender
-        self.args = args
-
-    def __str__(self):
-        return str(self.args)
+        (_THREAD_LOCALS._current_eventloop or self.eventloop).postevent(self, args, delay)
 
 class all_(Awaitable):
     """An awaitable that blocks the awaiting frame until all passed awaitables have woken up.
@@ -601,7 +586,7 @@ class sleep(EventSource):
         super().__init__("sleep({})".format(seconds), autoremove=True)
 
         # Raise event
-        self.post(self, None, max(0, seconds))
+        self.post(None, max(0, seconds))
 
 class hold(EventSource):
     """An awaitable used for suspending execution indefinitely.
@@ -637,9 +622,9 @@ class animate(EventSource):
         # Raise event
         if seconds <= interval:
             self._final_event = True
-            self.post(self, None, max(0, seconds))
+            self.post(None, max(0, seconds))
         else:
-            self.post(self, None, interval)
+            self.post(None, interval)
 
     def step(self, sender, msg):
         """Resend the animation event until the timeout is reached."""
@@ -657,9 +642,9 @@ class animate(EventSource):
             # Reraise event
             if self.seconds - t <= self.interval:
                 self._final_event = True
-                self.post(self, None, max(0, self.seconds - t))
+                self.post(None, max(0, self.seconds - t))
             else:
-                self.post(self, None, self.interval)
+                self.post(None, self.interval)
 
 class FrameMeta(abc.ABCMeta):
     def __new__(mcs, name, bases, dct):
@@ -822,7 +807,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
             try:
                 awaitable = self._generator.send(msg) # Continue coroutine
             except (StopIteration, GeneratorExit): # If frame finished
-                if msg is None: self.ready.send(self) # Send ready event if frame finished without ever being awaited
+                if msg is None: self.ready.send() # Send ready event if frame finished without ever being awaited
                 raise # Propagate event
             except RuntimeError as err:
                 abc = 0
@@ -833,7 +818,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
 
                 # Send ready event if not yet ready and awaitable is ready or doesn't have a ready event
                 if getattr(awaitable, 'ready', True) and not self.ready: # If awaitable is ready or awaitable doesn't have a ready event
-                    self.ready.send(self)
+                    self.ready.send()
 
     def _remove(self, msg):
         """Remove this awaitable from the frame hierarchy.
@@ -846,7 +831,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
             return False
 
         # Send frame free event
-        _THREAD_LOCALS._current_eventloop.sendevent(self.free, Event(self, None))
+        self.free.send()
 
         if self.removed: # If this frame was closed in response to the free event, ...
             return False

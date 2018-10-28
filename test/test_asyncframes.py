@@ -253,7 +253,7 @@ class TestAsyncFrames(unittest.TestCase):
         test = self
         @MyFrame
         async def main():
-            test.log.debug((await sleep(0.1)).args)
+            test.log.debug(await sleep(0.1))
         test.run_frame(main, expected_log="""
             0.1: None
             0.1: done
@@ -263,7 +263,7 @@ class TestAsyncFrames(unittest.TestCase):
         test = self
         @MyFrame
         async def main():
-            test.log.debug((await sleep(0)).args)
+            test.log.debug(await sleep(0))
         test.run_frame(main, expected_log="""
             0.0: None
             0.0: done
@@ -518,25 +518,25 @@ class TestAsyncFrames(unittest.TestCase):
 
             send_event(0.1, ae)
             send_event(0.2, ae)
-            e = await ae
-            test.log.debug("'%s' raised '%s' with args '%s'", e.sender, ae, e.args)
-            e = await ae
-            test.log.debug("'%s' reraised '%s' with args '%s'", e.sender, ae, e.args)
+            sender, args = await ae
+            test.log.debug("'%s' raised '%s' with args '%s'", sender, ae, args)
+            sender, args = await ae
+            test.log.debug("'%s' reraised '%s' with args '%s'", sender, ae, args)
 
             post_event(0.1, ae)
-            ae.post(self, 'my event args', 0.2)
-            e = await ae
-            test.log.debug("'%s' raised '%s' with args '%s'", e.sender, ae, e.args)
-            e = await ae
-            test.log.debug("'%s' reraised '%s' with args '%s'", e.sender, ae, e.args)
+            ae.post((self, 'my event args'), 0.2)
+            sender, args = await ae
+            test.log.debug("'%s' raised '%s' with args '%s'", sender, ae, args)
+            sender, args = await ae
+            test.log.debug("'%s' reraised '%s' with args '%s'", sender, ae, args)
 
             if test.supports_invoke:
                 threading.Thread(target=invoke_event, args=(0.1, ae)).start()
-                threading.Thread(target=ae.post, args=(self, 'my event args', 0.2)).start()
-                e = await ae
-                test.log.debug("'%s' raised '%s' with args '%s'", e.sender, ae, e.args)
-                e = await ae
-                test.log.debug("'%s' reraised '%s' with args '%s'", e.sender, ae, e.args)
+                threading.Thread(target=ae.post, args=((self, 'my event args'), 0.2)).start()
+                sender, args = await ae
+                test.log.debug("'%s' raised '%s' with args '%s'", sender, ae, args)
+                sender, args = await ae
+                test.log.debug("'%s' reraised '%s' with args '%s'", sender, ae, args)
             else:
                 await sleep(0.1)
                 test.log.debug("'invoke_event' raised 'my event' with args 'my event args'")
@@ -545,14 +545,14 @@ class TestAsyncFrames(unittest.TestCase):
         @Frame
         async def send_event(self, seconds, awaitable_event):
             await sleep(seconds)
-            awaitable_event.send(self, 'my event args')
+            awaitable_event.send((self, 'my event args'))
         @Frame
         async def post_event(self, seconds, awaitable_event):
             await sleep(seconds)
-            awaitable_event.post(self, 'my event args')
+            awaitable_event.post((self, 'my event args'))
         def invoke_event(seconds, awaitable_event):
             time.sleep(seconds)
-            awaitable_event.post('invoke_event', 'my event args')
+            awaitable_event.post(('invoke_event', 'my event args'))
 
         test.run_frame(main, expected_log="""
             0.1: 'send_event' raised 'my event' with args 'my event args'
