@@ -169,12 +169,12 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
             else:
                 self._idle = True
 
-    def sendevent(self, event):
+    def sendevent(self, eventsource, event):
         # Save current frame, since it will be modified inside Awaitable.process()
         currentframe = _THREAD_LOCALS._current_frame
 
         try:
-            event.source.process(event.source, event)
+            eventsource.process(eventsource, event)
         except GeneratorExit:
             pass # Catch any leaked GeneratorExit's (This can happen when a thread tries to cancel another thread's coroutine by raising GeneratorExit)
         finally:
@@ -182,19 +182,7 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
             _THREAD_LOCALS._current_frame = currentframe
 
     def postevent(self, event, delay=0):
-        self._enqueue(delay, AbstractEventLoop.sendevent, (event, ), event.source._eventloop_affinity)
-
-    def _start_coroutine(self, frame):
-        # Save current frame, since it will be modified inside Awaitable.process()
-        currentframe = _THREAD_LOCALS._current_frame
-
-        try:
-            frame.process(None, None)
-        except GeneratorExit:
-            pass # Catch any leaked GeneratorExit's (This can happen when a thread tries to cancel another thread's coroutine by raising GeneratorExit)
-        finally:
-            # Restore current frame
-            _THREAD_LOCALS._current_frame = currentframe
+        self._enqueue(delay, AbstractEventLoop.sendevent, (event.source, event), event.source._eventloop_affinity)
 
     def process(self, sender, msg):
         if type(msg) == StopIteration: self._result = msg.value
@@ -419,7 +407,7 @@ class EventSource(Awaitable):
             args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event.
         """
 
-        _THREAD_LOCALS._current_eventloop.sendevent(Event(sender, self, args))
+        _THREAD_LOCALS._current_eventloop.sendevent(self, Event(sender, self, args))
 
     def post(self, sender, args=None, delay=0):
         """Enqueue an event in the event loop.
@@ -681,7 +669,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
     """An object within the frame hierarchy.
 
     This class represents the default frame class. All other frame classes have
-    to be derived from ``Frame``.
+    to be derived from :class:`Frame`.
 
     A frame is an instance of a frame class. Use the nested Factory class to
     create frames.
@@ -792,7 +780,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
             if inspect.isawaitable(self._generator): # If framefunc is a coroutine
                 if self.startup_behaviour == FrameStartupBehaviour.delayed:
                     # Post coroutine to the event queue
-                    _THREAD_LOCALS._current_eventloop._enqueue(0.0, AbstractEventLoop._start_coroutine, (self, ), self._eventloop_affinity)
+                    _THREAD_LOCALS._current_eventloop._enqueue(0.0, AbstractEventLoop.sendevent, (self, None), self._eventloop_affinity)
                 elif self.startup_behaviour == FrameStartupBehaviour.immediate:
                     # Start coroutine
                     try:
@@ -854,7 +842,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
             return False
 
         # Send frame free event
-        _THREAD_LOCALS._current_eventloop.sendevent(Event(self, self.free, None))
+        _THREAD_LOCALS._current_eventloop.sendevent(self.free, Event(self, self.free, None))
 
         if self.removed: # If this frame was closed in response to the free event, ...
             return False
