@@ -1,15 +1,15 @@
-from asyncframes import Frame, EventSource, sleep
+from asyncframes import Frame, Event, sleep
 from asyncframes.asyncio_eventloop import EventLoop
 
 @Frame
 async def timer(self, interval):
     # Initialization code
-    self.tick = EventSource('timer.tick')
+    self.tick = Event('timer.tick')
 
     # Main code
     while True:
         await sleep(1)
-        self.tick.post(self)
+        self.tick.post()
 
 @Frame
 async def main_frame():

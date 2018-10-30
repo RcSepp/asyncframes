@@ -3,7 +3,7 @@
 # Distributed under the MIT License. See LICENSE file for more info.
 
 import signal
-from asyncframes import Frame, EventSource, sleep
+from asyncframes import Frame, Event, sleep
 from asyncframes.asyncio_eventloop import EventLoop
 
 @Frame
@@ -16,13 +16,13 @@ async def progress_reporter(self, title):
         return "\r" + prefix + '#' * progress_length + '-' * (progressbar_length - progress_length) + postfix
 
     # Initialize frame
-    self.progress = EventSource(self.__name__ + ".progress")
+    self.progress = Event(self.__name__ + ".progress")
     print(create_progress_str(0), end="")
 
     # Report progress
-    event = await (self.free | self.progress)
-    while event.source != self.free:
-        progress_value = max(0, min(100, event.args))
+    event, progress_value = await (self.free | self.progress)
+    while event != self.free:
+        progress_value = max(0, min(100, progress_value))
         print(create_progress_str(progress_value), end="")
 
         if progress_value == 100:
@@ -30,24 +30,24 @@ async def progress_reporter(self, title):
             print("")
             return
 
-        event = await (self.free | self.progress)
+        event, progress_value = await (self.free | self.progress)
 
     # Cleanup after aborted process
     print("")
     print("process aborted")
 
 @Frame
-async def process(self, pr):
+async def process(pr):
     for progress in range(0, 100, 13):
         await sleep(1)
-        pr.progress.post(self, progress)
+        pr.progress.post(progress)
     await sleep(1)
-    pr.progress.post(self, 100)
+    pr.progress.post(100)
 
 @Frame
 async def sigint_listener(self):
     # Register a custom handler for the SIGINT signal
-    sigint = EventSource('sigint')
+    sigint = Event('sigint')
     original_sigint_handler = signal.getsignal(signal.SIGINT)
     signal.signal(signal.SIGINT, lambda s, f: sigint.post(None))
 
