@@ -24,7 +24,6 @@ class Trace(object):
             "EventLoop._spawnthread",
             "EventLoop.<listcomp>",
             "Frame.__init__",
-            "EventSource.__init__",
             "Event.__init__",
             "Frame.removed"
         ])

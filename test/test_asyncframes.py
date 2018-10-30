@@ -513,7 +513,7 @@ class TestAsyncFrames(unittest.TestCase):
         test = self
         @Frame
         async def main(self):
-            ae = EventSource('my event')
+            ae = Event('my event')
 
             send_event(0.1, ae)
             send_event(0.2, ae)
@@ -891,19 +891,19 @@ class TestAsyncFrames(unittest.TestCase):
             await e
         @PFrame
         async def pframe2(self):
-            self.e = EventSource('my_event')
+            self.e = Event('my_event')
             await self.e
         @Frame
-        async def main(self):
-            e = EventSource('my_event')
+        async def main():
+            e = Event('my_event')
             p = pframe(e)
             await p.ready
-            e.send(self)
+            e.send()
             test.assertEqual(p.removed, True)
 
             p2 = pframe2()
             await p2.ready
-            p2.e.send(self)
+            p2.e.send()
             test.assertEqual(p2.removed, True)
         test.run_frame(main)
 
@@ -917,15 +917,15 @@ class TestAsyncFrames(unittest.TestCase):
             print("frame1 (eventloop {}) woke up".format(get_current_eventloop_index()))
             test.log.debug('1')
         @Frame(thread_idx=3)
-        async def frame2(self, e):
+        async def frame2(e):
             print("frame2 (eventloop {}) wakes up e".format(get_current_eventloop_index()))
-            e.send(self)
+            e.send()
             print("frame2 (eventloop {}) continues".format(get_current_eventloop_index()))
             test.log.debug('2')
         @Frame
         async def main(self):
             print('----------')
-            e = EventSource('my_event')
+            e = Event('my_event')
             f1 = frame1(e)
             await f1.ready
             f2 = frame2(e)

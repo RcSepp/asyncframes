@@ -17,7 +17,7 @@ import warnings
 
 
 __all__ = [
-    'all_', 'animate', 'any_', 'Awaitable', 'AbstractEventLoop', 'EventSource',
+    'all_', 'animate', 'any_', 'Awaitable', 'AbstractEventLoop', 'Event',
     'find_parent', 'Frame', 'FrameStartupBehaviour', 'get_current_eventloop_index',
     'InvalidOperationException', 'hold', 'PFrame', 'Primitive', 'sleep'
 ]
@@ -194,7 +194,7 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
 
 
 class Awaitable(collections.abc.Awaitable):
-    """An awaitable frame or event source.
+    """An awaitable frame or event.
 
     Every node in the frame hierarchy is a subclass of `Awaitable`. An awaitable has a `__name__`,
     a parent awaitable (None, if the awaitable is the main frame), a list of child awaitables and
@@ -342,17 +342,17 @@ class Awaitable(collections.abc.Awaitable):
 
         return any_(self, other)
 
-class EventSource(Awaitable):
-    """An awaitable emitter of events.
+class Event(Awaitable):
+    """An awaitable event.
 
     Instantiate or overload this class to implement new events.
-    Each type of event should be emitted by exactly one event source.
-    For example, key-up and key-down events should be implemented by two separate event sources.
-    Event sources represent leave nodes in the frame hierarchy.
+    Each type of event should be emitted by exactly one event class.
+    For example, key-up and key-down events should be implemented by two separate events.
+    Events represent leave nodes in the frame hierarchy.
 
     Args:
         name (str): The name of the event.
-        autoremove (bool, optional): Defaults to False. If `True`, removes the source after it has been resumed by an event.
+        autoremove (bool, optional): Defaults to False. If `True`, removes the event after it has been woken.
     """
 
     def __init__(self, name, autoremove=False):
@@ -389,11 +389,11 @@ class EventSource(Awaitable):
         """Handle incoming events.
 
         Args:
-            sender (EventSource): The source of the event. This value is always identical to `self`.
-            msg: The incomming event arguments.
+            sender (Event): The event to be handled. This value is always identical to `self`.
+            msg: The event arguments.
 
         Raises:
-            StopIteration: If the incoming event should wake up awaiting frames, raise a StopIteration with `value` set to the event.
+            StopIteration: If this event should wake up awaiting frames, raise a StopIteration with `value` set to the event arguments.
         """
 
         stop = StopIteration()
@@ -404,7 +404,6 @@ class EventSource(Awaitable):
         """Dispatch and immediately process an event.
 
         Args:
-            sender: The entity triggering the event, for example, the button instance on a button-press event.
             args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event.
         """
 
@@ -414,7 +413,6 @@ class EventSource(Awaitable):
         """Enqueue an event in the event loop.
 
         Args:
-            sender: The entity triggering the event, for example, the button instance on a button-press event.
             args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event.
             delay (float, optional): Defaults to 0. The time in seconds to wait before posting the event.
         """
@@ -575,8 +573,8 @@ class any_(Awaitable):
         return False
 
 
-class sleep(EventSource):
-    """An awaitable used for suspending execution by the specified amount of time.
+class sleep(Event):
+    """An awaitable event used for suspending execution by the specified amount of time.
 
     A duration of 0 seconds will resume the awaiting frame as soon as possible.
     This is useful to implement non-blocking loops.
@@ -591,8 +589,8 @@ class sleep(EventSource):
         # Raise event
         self.post(None, max(0, seconds))
 
-class hold(EventSource):
-    """An awaitable used for suspending execution indefinitely.
+class hold(Event):
+    """An awaitable event used for suspending execution indefinitely.
 
     Frames are automatically removed when the frame coroutine finishes.
     If you would like the frame to remain open until it is removed, write `await hold()` at the end of the coroutine.
@@ -605,8 +603,8 @@ class hold(EventSource):
 
         pass
 
-class animate(EventSource):
-    """An awaitable used for periodically calling a callback function for the specified amount of time.
+class animate(Event):
+    """An awaitable event used for periodically calling a callback function for the specified amount of time.
 
     Args:
         seconds (float): The duration of the animation.
@@ -744,8 +742,8 @@ class Frame(Awaitable, metaclass=FrameMeta):
         self._activechild = None
         self._primitives = []
         self._generator = None
-        self.ready = EventSource(str(self.__name__) + ".ready", True)
-        self.free = EventSource(str(self.__name__) + ".free", True)
+        self.ready = Event(str(self.__name__) + ".ready", True)
+        self.free = Event(str(self.__name__) + ".free", True)
         self._eventloop_affinity = _THREAD_LOCALS._current_eventloop
         if thread_idx is not None:
             self._eventloop_affinity = self._eventloop_affinity.eventloops[thread_idx]
