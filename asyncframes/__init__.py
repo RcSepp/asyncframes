@@ -71,7 +71,6 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         thread.join()
 
     def __init__(self):
-        self.frame_exception_handler = None
         self._idle = True
         self._eventloop_affinity = self
         self._result = None
@@ -211,6 +210,7 @@ class Awaitable(collections.abc.Awaitable):
         self._result = None
         self._listeners = set()
         self._eventloop_affinity = None
+        self.exception_handler = None
 
     def _remove(self, msg):
         # Mark self as removed
@@ -307,13 +307,22 @@ class Awaitable(collections.abc.Awaitable):
 
                 # Call exception handler
                 if err != msg:
-                    maineventloop = _THREAD_LOCALS._current_eventloop.eventloops[0]
-                    if maineventloop.frame_exception_handler and maineventloop.frame_exception_handler(err):
-                        pass
-                    elif maineventloop._eventloop_affinity is None or maineventloop._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
-                        maineventloop.process(self, err)
-                    else:
-                        maineventloop._eventloop_affinity._invoke(0, maineventloop.process, (self, err))
+                    awaitable = self
+                    while awaitable:
+                        if awaitable.exception_handler:
+                            try:
+                                awaitable.exception_handler(self, err)
+                            except Exception as exception_handler_err:
+                                err = exception_handler_err
+                            else:
+                                break
+                        awaitable = awaitable._parent
+                    if not awaitable:
+                        maineventloop = _THREAD_LOCALS._current_eventloop.eventloops[0]
+                        if maineventloop._eventloop_affinity is None or maineventloop._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
+                            maineventloop.process(self, err)
+                        else:
+                            maineventloop._eventloop_affinity._invoke(0, maineventloop.process, (self, err))
 
             # Remove awaitable and propagate event
             self._remove(err)
@@ -811,8 +820,6 @@ class Frame(Awaitable, metaclass=FrameMeta):
             except (StopIteration, GeneratorExit): # If frame finished
                 if msg is None: self.ready.send() # Send ready event if frame finished without ever being awaited
                 raise # Propagate event
-            except RuntimeError as err:
-                abc = 0
             except Exception as err: # If frame raised exception
                 raise # Propagate event
             else: # If frame awaits awaitable
