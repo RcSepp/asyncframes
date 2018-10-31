@@ -70,7 +70,7 @@ class Trace(object):
         # Log line stats
         if self.trace_mode == Trace.Mode.in_situ:
             print('thread {} | "{}", line {}, in {}:'.format(threadno, fname, lineno, coname).ljust(80) + line, end='')
-        else:
+        elif self.trace_stream:
             self.trace_stream.write('thread {} | "{}", line {}, in {}:'.format(threadno, fname, lineno, coname).ljust(80) + line)
 
         # Check frame eventloop affinity against current eventloop
@@ -102,14 +102,15 @@ class Trace(object):
         if self.old_trace:
             sys.settrace(self.old_trace)
 
-        if type(self.trace_stream) == io.StringIO:
-            # Print string stream
-            if self.trace_mode == Trace.Mode.on_done or (exc_type is not None and self.trace_mode == Trace.Mode.on_error):
+        if self.trace_mode == Trace.Mode.on_done or (exc_type is not None and self.trace_mode == Trace.Mode.on_error):
+            if type(self.trace_stream) == io.StringIO:
+                # Print string stream
                 print(self.trace_stream.getvalue())
-        else:
-            # Close file stream
+
+            # Close trace stream
             self.trace_stream.close()
-        
-        # Reset trace stream
-        self.trace_stream.truncate(0)
-        self.trace_stream.seek(0)
+            self.trace_stream = None
+        else:
+            # Reset trace stream
+            self.trace_stream.truncate(0)
+            self.trace_stream.seek(0)
