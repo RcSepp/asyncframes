@@ -74,6 +74,7 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         self._idle = True
         self._eventloop_affinity = self
         self._result = None
+        self._exception = None
 
     def run(self, frame, *frameargs, num_threads=0, **framekwargs):
         if num_threads <= 0:
@@ -99,6 +100,8 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         for eventloop in self.eventloops[1:]: eventloop.eventloops = self.eventloops
 
         self._idle = False
+        self._result = None
+        self._exception = None
 
         try:
             mainframe = frame(*frameargs, **framekwargs)
@@ -108,8 +111,8 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         except:
             raise
         else:
-            if isinstance(self._result, Exception):
-                raise self._result
+            if self._exception:
+                raise self._exception
             else:
                 return self._result
         finally:
@@ -187,7 +190,7 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
     def process(self, sender, msg):
         if type(msg) == StopIteration: self._result = msg.value
         elif type(msg) == GeneratorExit: self._result = None
-        else: self._result = msg
+        else: self._exception = msg
 
         self._stop() # Stop event loop
 
@@ -262,20 +265,18 @@ class Awaitable(collections.abc.Awaitable):
 
     def __await__(self):
         if self.removed: # If this awaitable already finished
-            if isinstance(self._result, Exception):
-                raise self._result
-            else:
-                return self._result
+            return self._result
         try:
             while True:
                 msg = yield self
-                if isinstance(msg, BaseException):
-                    raise msg
+                if type(msg) == StopIteration:
+                    return msg.value
+                elif type(msg) == GeneratorExit:
+                    return None
+                elif isinstance(msg, BaseException):
+                    return msg
         except (StopIteration, GeneratorExit):
-            if isinstance(self._result, Exception):
-                raise self._result
-            else:
-                return self._result
+            return self._result
 
     @abc.abstractmethod
     def step(self, sender, msg):
@@ -448,12 +449,7 @@ class all_(Awaitable):
         self._result = [None] * len(awaitables)
         for i, awaitable in enumerate(awaitables):
             if awaitable.removed:
-                if isinstance(awaitable._result, Exception):
-                    self._result = awaitable._result
-                    self._remove(self._result)
-                    return
-                else:
-                    self._result[i] = awaitable._result
+                self._result[i] = awaitable._result
             else:
                 self._awaitables[awaitable].append(i)
                 awaitable._listeners.add(self)
@@ -482,10 +478,11 @@ class all_(Awaitable):
             if type(msg) == StopIteration:
                 for i in self._awaitables.pop(sender, ()):
                     self._result[i] = msg.value
-            else:
+            elif type(msg) == GeneratorExit:
                 self._awaitables.pop(sender, None)
-                if type(msg) != GeneratorExit:
-                    raise msg
+            else:
+                for i in self._awaitables.pop(sender, ()):
+                    self._result[i] = msg
 
         if not self._awaitables:
             stop = StopIteration()
@@ -556,6 +553,10 @@ class any_(Awaitable):
         if isinstance(msg, BaseException):
             if type(msg) == StopIteration:
                 msg.value = (sender, msg.value)
+            else:
+                stop = StopIteration()
+                stop.value = (sender, msg)
+                msg = stop
             raise msg
 
     def _remove(self, msg):

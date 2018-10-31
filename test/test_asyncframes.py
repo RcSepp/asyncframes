@@ -58,6 +58,9 @@ async def wait(test, seconds, name):
     test.log.debug(name)
     return "some result"
 
+class MyException(Exception):
+    pass
+
 EVENTLOOP_CLASS = None
 SKIP_TEST_CASE = None
 
@@ -77,14 +80,6 @@ class TestAsyncFrames(unittest.TestCase):
         
         # Check if the event loop class implements AbstractEventLoop._invoke
         self.supports_invoke = self.loop.__class__._invoke != AbstractEventLoop._invoke
-
-        # Register event handler for exceptions raised within frames
-        def frame_exception_handler(err):
-            if isinstance(err, AssertionError):
-                return False # Raise unittest assertions
-            self.log.debug("Frame exception caught: " + repr(err))
-            return True
-        self.loop.frame_exception_handler = frame_exception_handler
 
         # Create logger for debugging program flow using time stamped log messages
         # Create time stamped log messages using self.log.debug(...)
@@ -112,12 +107,13 @@ class TestAsyncFrames(unittest.TestCase):
             self.logstream.truncate(0) # Reset log
             self.logstream.seek(0) # Reset log
             self.logformatter.starttime = datetime.datetime.now() # Reset log start time
-            await frame(*frameargs)
-        cm = line_tracer.Trace(line_tracer.Trace.Mode.on_error, TRACE_OUTPUT, True) if USE_TRACER else nullcontext()
+            return await frame(*frameargs)
+        result = None
+        cm = line_tracer.Trace(TRACE_MODE, TRACE_OUTPUT, True) if USE_TRACER else nullcontext()
         for _ in range(NUM_ITERATIONS):
             with cm:
                 try:
-                    self.loop.run(mainframe, num_threads=NUM_THREADS)
+                    result = self.loop.run(mainframe, num_threads=NUM_THREADS)
                     self.log.debug('done')
                     if expected_log is not None:
                         # Compare log with expected_log
@@ -134,7 +130,8 @@ class TestAsyncFrames(unittest.TestCase):
                         raise
                 else:
                     if assert_raises or assert_raises_regex:
-                        raise AssertionError((assert_raises or assert_raises_regex).__name__ + " not raised")
+                        raise AssertionError((assert_raises or assert_raises_regex[0]).__name__ + " not raised")
+        return result
 
     def test_simple(self):
         test = self
@@ -566,64 +563,73 @@ class TestAsyncFrames(unittest.TestCase):
     def test_exceptions(self):
         test = self
         test.maxDiff = None
-        @Frame
-        async def main():
-            # Catch exception raised from active frame
-            with test.assertRaises(ZeroDivisionError):
-                await raise_immediately()
-            with test.assertRaises(ZeroDivisionError):
-                await (hold() | raise_immediately())
-            with test.assertRaises(ZeroDivisionError):
-                await (hold() & raise_immediately())
-            test.log.debug(1)
 
-            # Catch exception raised from active frame woken by event
-            with test.assertRaises(ZeroDivisionError):
-                await raise_delayed()
-            with test.assertRaises(ZeroDivisionError):
-                await (hold() | raise_delayed())
-            with test.assertRaises(ZeroDivisionError):
-                await (hold() & raise_delayed())
-            test.log.debug(2)
-
-            # Raise passive exception
-            # It will be caught by EventLoop.frame_exception_handler
-            raise_immediately()
-            hold() | raise_immediately()
-            hold() & raise_immediately()
-            await sleep(0.1)
-            test.log.debug(3)
-
-            # Raise passive exception woken by event
-            # It will be caught by EventLoop.frame_exception_handler
-            raise_delayed()
-            hold() | raise_delayed()
-            hold() & raise_delayed()
-            await sleep(0.2)
         @Frame
         async def raise_immediately():
-            raise ZeroDivisionError()
+            raise MyException()
         @Frame
         async def raise_delayed():
             await sleep(0.1)
-            raise ZeroDivisionError()
-        test.run_frame(main, expected_log="""
-            0.0: Frame exception caught: ZeroDivisionError()
-            0.0: Frame exception caught: ZeroDivisionError()
-            0.0: Frame exception caught: ZeroDivisionError()
-            0.0: 1
-            0.1: Frame exception caught: ZeroDivisionError()
-            0.2: Frame exception caught: ZeroDivisionError()
-            0.3: Frame exception caught: ZeroDivisionError()
-            0.3: 2
-            0.3: Frame exception caught: ZeroDivisionError()
-            0.3: Frame exception caught: ZeroDivisionError()
-            0.3: Frame exception caught: ZeroDivisionError()
-            0.4: 3
-            0.5: Frame exception caught: ZeroDivisionError()
-            0.5: Frame exception caught: ZeroDivisionError()
-            0.5: Frame exception caught: ZeroDivisionError()
-            0.6: done
+            raise MyException()
+        @Frame
+        async def return_exception():
+            return MyException()
+        def suppressing_exception_handler(frame, err):
+            if type(err) == MyException:
+                test.log.debug("Suppressed {} of frame {}".format(repr(err), frame))
+            else:
+                raise
+        def reraising_exception_handler(frame, err):
+            test.log.debug("Reraised {} of frame {}".format(repr(err), frame))
+            raise
+
+        # Test eventloop raising exception
+        test.run_frame(raise_immediately, assert_raises=MyException)
+        # Test eventloop returning exception
+        test.assertEqual(type(test.run_frame(return_exception)), MyException)
+
+        # Test event handling within eventloop
+        @Frame
+        async def main(self):
+            self.exception_handler = suppressing_exception_handler
+            for frame in [raise_immediately, raise_delayed, return_exception]:
+                frame()
+                hold() | frame()
+                sleep() & frame()
+                test.assertEqual(type(await frame()), MyException)
+                test.assertEqual(tuple(map(type, await (hold() | frame()))), (frame.frameclass, MyException))
+                test.assertEqual(tuple(map(type, await (sleep() & frame()))), (type(None), MyException))
+
+            self.exception_handler = reraising_exception_handler
+            frame = raise_delayed()
+            frame.exception_handler = suppressing_exception_handler
+            await frame
+
+            #TODO: # Implement starting frames with exception handler
+            #TODO:
+            #TODO: * Option 1:
+            #TODO:   with exception_handler(suppressing_exception_handler):
+            #TODO:       raise_immediately()
+            #TODO:
+            #TODO: * Option 2:
+            #TODO:   raise_immediately(exception_handler=suppressing_exception_handler)
+            raise_immediately() #TODO: ... instead of this line
+            await sleep(0.2)
+        test.run_frame(main, assert_raises=MyException, expected_log="""
+            0.0: Suppressed MyException() of frame raise_immediately
+            0.0: Suppressed MyException() of frame raise_immediately
+            0.0: Suppressed MyException() of frame raise_immediately
+            0.0: Suppressed MyException() of frame raise_immediately
+            0.0: Suppressed MyException() of frame raise_immediately
+            0.0: Suppressed MyException() of frame raise_immediately
+            0.0: Suppressed MyException() of frame raise_delayed
+            0.0: Suppressed MyException() of frame raise_delayed
+            0.0: Suppressed MyException() of frame raise_delayed
+            0.0: Suppressed MyException() of frame raise_delayed
+            0.0: Suppressed MyException() of frame raise_delayed
+            0.0: Suppressed MyException() of frame raise_delayed
+            0.0: Suppressed MyException() of frame raise_delayed
+            0.0: Reraised MyException() of frame raise_immediately
         """)
 
     def test_animate(self):
@@ -661,7 +667,7 @@ class TestAsyncFrames(unittest.TestCase):
             await wait(test, 0.1, 'main')
         @Frame
         def raise_exception():
-            raise ZeroDivisionError
+            raise MyException
         test.run_frame(main, expected_log="""
             0.1: main
             0.1: done
@@ -670,7 +676,7 @@ class TestAsyncFrames(unittest.TestCase):
             0.1: main
             0.1: done
         """)
-        test.run_frame(raise_exception, assert_raises=ZeroDivisionError)
+        test.run_frame(raise_exception, assert_raises=MyException)
         test.run_frame(main, expected_log="""
             0.1: main
             0.1: done
@@ -731,21 +737,21 @@ class TestAsyncFrames(unittest.TestCase):
         @Frame
         async def case3():
             test.log.debug('case3_1')
-            raise ZeroDivisionError()
+            raise MyException()
         @Frame
-        async def main():
+        async def main(self):
+            self.exception_handler = lambda frame, err: test.log.debug("Frame exception caught: %s", repr(err))
             await case1().ready
             await case2().ready
             c3 = case3()
-            with test.assertRaises(ZeroDivisionError):
-                await (c3.ready | c3)
+            test.assertEqual(tuple(map(type, await (c3.ready | c3))), (Frame, MyException))
             test.assertFalse(c3.ready)
 
         test.run_frame(main, expected_log="""
             0.0: case1_1
             0.0: case2_1
             0.0: case3_1
-            0.0: Frame exception caught: ZeroDivisionError()
+            0.0: Frame exception caught: MyException()
             0.0: done
         """)
 
@@ -804,17 +810,17 @@ class TestAsyncFrames(unittest.TestCase):
     def test_delayed_await(self):
         test = self
         @Frame
-        async def main():
+        async def main(self):
+            self.exception_handler = lambda frame, err: test.log.debug("Frame exception caught: %s", repr(err))
             f = raise_exception()
             await sleep(0.1)
-            with test.assertRaises(ZeroDivisionError):
-                await f
+            await f
             test.log.debug('after exception')
         @Frame
         async def raise_exception():
-            raise ZeroDivisionError
+            raise MyException
         test.run_frame(main, expected_log="""
-            0.0: Frame exception caught: ZeroDivisionError()
+            0.0: Frame exception caught: MyException()
             0.1: after exception
             0.1: done
         """)
@@ -828,8 +834,8 @@ class TestAsyncFrames(unittest.TestCase):
             test.log.debug('after exception')
         @Frame
         async def raise_exception():
-            raise ZeroDivisionError
-        test.run_frame(main, assert_raises=ZeroDivisionError)
+            raise MyException
+        test.run_frame(main, assert_raises=MyException)
 
     def test_startup_behaviour(self):
         test = self
