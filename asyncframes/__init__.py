@@ -213,9 +213,14 @@ class Awaitable(collections.abc.Awaitable):
         self._eventloop_affinity = None
 
     def _remove(self, msg):
+        # Mark self as removed
         if self._removed:
             return False
         self._removed = True
+
+        # Remove self from parent frame
+        if self._parent:
+            self._parent._children.remove(self)
 
         # Wake up listeners
         if self._listeners:
@@ -436,7 +441,7 @@ class all_(Awaitable):
             if awaitable.removed:
                 if isinstance(awaitable._result, Exception):
                     self._result = awaitable._result
-                    super()._remove(self._result)
+                    self._remove(self._result)
                     return
                 else:
                     self._result[i] = awaitable._result
@@ -445,7 +450,7 @@ class all_(Awaitable):
                 awaitable._listeners.add(self)
 
         if not self._awaitables:
-            super()._remove(self._result)
+            self._remove(self._result)
             return
 
         self._parent = _THREAD_LOCALS._current_frame
@@ -495,8 +500,6 @@ class all_(Awaitable):
             for awaitable in self._awaitables:
                 awaitable._listeners.discard(self)
             self._awaitables.clear()
-            if self._parent:
-                self._parent._children.remove(self)
 
             # Remove awaitable
             super()._remove(msg)
@@ -519,7 +522,7 @@ class any_(Awaitable):
         for awaitable in awaitables:
             if awaitable.removed:
                 self._result = (awaitable, awaitable._result)
-                super()._remove(self._result)
+                self._remove(self._result)
                 return
             else:
                 self._awaitables.add(awaitable)
@@ -563,8 +566,6 @@ class any_(Awaitable):
             for awaitable in self._awaitables:
                 awaitable._listeners.discard(self)
             self._awaitables.clear()
-            if self._parent:
-                self._parent._children.remove(self)
 
             # Remove awaitable
             super()._remove(msg)
@@ -850,10 +851,6 @@ class Frame(Awaitable, metaclass=FrameMeta):
                         self._children[-1]._remove(GeneratorExit())
                     except GeneratorExit as err:
                         genexit = err # Delay raising GeneratorExit
-
-                # Remove self from parent frame
-                if self._parent:
-                    self._parent._children.remove(self)
 
                 # Remove primitives
                 while self._primitives:
