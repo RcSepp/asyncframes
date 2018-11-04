@@ -188,10 +188,7 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         self._enqueue(delay, AbstractEventLoop.sendevent, (eventsource, event), eventsource._eventloop_affinity)
 
     def process(self, sender, msg):
-        if type(msg) == StopIteration: self._result = msg.value
-        elif type(msg) == GeneratorExit: self._result = None
-        else: self._exception = msg
-
+        self._result = msg
         self._stop() # Stop event loop
 
 
@@ -215,7 +212,13 @@ class Awaitable(collections.abc.Awaitable):
         self._eventloop_affinity = None
         self.exception_handler = None
 
-    def _remove(self, msg):
+    def remove(self):
+        """Remove this awaitable from the frame hierarchy.
+
+        Returns:
+            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
+        """
+
         # Mark self as removed
         if self._removed:
             return False
@@ -231,21 +234,12 @@ class Awaitable(collections.abc.Awaitable):
             self._listeners = set()
             for listener in listeners:
                 if listener._eventloop_affinity is None or listener._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
-                    listener.process(self, msg)
+                    listener.process(self, self._result)
                 else:
-                    listener._eventloop_affinity._invoke(0, listener.process, (self, msg))
+                    listener._eventloop_affinity._invoke(0, listener.process, (self, self._result))
 
         del self
         return True
-
-    def remove(self):
-        """Remove this awaitable from the frame hierarchy.
-
-        Returns:
-            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
-        """
-
-        return self._remove(GeneratorExit())
 
     @property
     def removed(self):
@@ -267,14 +261,7 @@ class Awaitable(collections.abc.Awaitable):
         if self.removed: # If this awaitable already finished
             return self._result
         try:
-            while True:
-                msg = yield self
-                if type(msg) == StopIteration:
-                    return msg.value
-                elif type(msg) == GeneratorExit:
-                    return None
-                elif isinstance(msg, BaseException):
-                    return msg
+            return (yield self)
         except (StopIteration, GeneratorExit):
             return self._result
 
@@ -320,13 +307,14 @@ class Awaitable(collections.abc.Awaitable):
                         awaitable = awaitable._parent
                     if not awaitable:
                         maineventloop = _THREAD_LOCALS._current_eventloop.eventloops[0]
+                        maineventloop._exception = err
                         if maineventloop._eventloop_affinity is None or maineventloop._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
-                            maineventloop.process(self, err)
+                            maineventloop._stop()
                         else:
-                            maineventloop._eventloop_affinity._invoke(0, maineventloop.process, (self, err))
+                            maineventloop._eventloop_affinity._invoke(0, maineventloop._stop, ())
 
             # Remove awaitable and propagate event
-            self._remove(err)
+            self.remove()
         else:
             if getattr(self, 'ready', True): # If self is ready or self doesn't have a ready event
                 # Send ready event to all listeners that have a ready event, but aren't ready yet
@@ -375,7 +363,7 @@ class Event(Awaitable):
         self.autoremove = autoremove
         self.eventloop = _THREAD_LOCALS._current_eventloop # Store creating eventloop, as a fallback in case self.post() is called from a thread without an eventloop
 
-    def _remove(self, msg):
+    def remove(self):
         """Remove this awaitable from the frame hierarchy.
 
         If `autoremove` is False, this function is supressed
@@ -385,7 +373,7 @@ class Event(Awaitable):
         """
         
         if self.autoremove:
-            return super()._remove(msg)
+            return super().remove()
         else:
             # Wake up listeners
             if self._listeners:
@@ -393,9 +381,9 @@ class Event(Awaitable):
                 self._listeners = set()
                 for listener in listeners:
                     if listener._eventloop_affinity is None or listener._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
-                        listener.process(self, msg)
+                        listener.process(self, self._result)
                     else:
-                        listener._eventloop_affinity._invoke(0, listener.process, (self, msg))
+                        listener._eventloop_affinity._invoke(0, listener.process, (self, self._result))
 
     def __bool__(self):
         return self._removed
@@ -455,7 +443,7 @@ class all_(Awaitable):
                 awaitable._listeners.add(self)
 
         if not self._awaitables:
-            self._remove(self._result)
+            self.remove()
             return
 
         self._parent = _THREAD_LOCALS._current_frame
@@ -467,29 +455,22 @@ class all_(Awaitable):
 
         Args:
             sender (Awaitable): The awaking child.
-            msg (BaseException): A StopIteration exception with the awaking child's result or an exception raised in a child frame.
+            msg: The awaking child's result or an exception raised in a child frame.
 
         Raises:
             StopIteration: Once all children woke up, this raises a StopIteration with `value` set to a dict of all children's results.
             BaseException: If msg is an Exception other than GeneratorExit or StopIteration, the exception is re-raised.
         """
 
-        if isinstance(msg, BaseException):
-            if type(msg) == StopIteration:
-                for i in self._awaitables.pop(sender, ()):
-                    self._result[i] = msg.value
-            elif type(msg) == GeneratorExit:
-                self._awaitables.pop(sender, None)
-            else:
-                for i in self._awaitables.pop(sender, ()):
-                    self._result[i] = msg
+        for i in self._awaitables.pop(sender, ()):
+            self._result[i] = msg
 
         if not self._awaitables:
             stop = StopIteration()
             stop.value = self._result
             raise stop
 
-    def _remove(self, msg):
+    def remove(self):
         """Remove this awaitable from the frame hierarchy.
 
         Returns:
@@ -508,7 +489,7 @@ class all_(Awaitable):
             self._awaitables.clear()
 
             # Remove awaitable
-            super()._remove(msg)
+            super().remove()
 
             return True
         return False
@@ -528,7 +509,7 @@ class any_(Awaitable):
         for awaitable in awaitables:
             if awaitable.removed:
                 self._result = (awaitable, awaitable._result)
-                self._remove(self._result)
+                self.remove()
                 return
             else:
                 self._awaitables.add(awaitable)
@@ -543,23 +524,18 @@ class any_(Awaitable):
 
         Args:
             sender (Awaitable): The awaking child.
-            msg (BaseException): A StopIteration exception with the awaking child's result or an exception raised in a child frame.
+            msg: The awaking child's result or an exception raised in a child frame.
 
         Raises:
             StopIteration: If msg indicates an awaking child, store its result as this frame's result.
             BaseException: Forward any exceptions.
         """
 
-        if isinstance(msg, BaseException):
-            if type(msg) == StopIteration:
-                msg.value = (sender, msg.value)
-            else:
-                stop = StopIteration()
-                stop.value = (sender, msg)
-                msg = stop
-            raise msg
+        stop = StopIteration()
+        stop.value = (sender, msg)
+        raise stop
 
-    def _remove(self, msg):
+    def remove(self):
         """Remove this awaitable from the frame hierarchy.
 
         Returns:
@@ -578,7 +554,7 @@ class any_(Awaitable):
             self._awaitables.clear()
 
             # Remove awaitable
-            super()._remove(msg)
+            super().remove()
 
             return True
         return False
@@ -802,7 +778,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
 
         Args:
             sender (Awaitable): The resumed awaitable.
-            msg (BaseException): A message to be forwarded to the coroutine or None to start the coroutine.
+            msg: A message to be forwarded to the coroutine or None to start the coroutine.
 
         Raises:
             StopIteration: Raised if the coroutine finished with a result.
@@ -830,7 +806,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
                 if getattr(awaitable, 'ready', True) and not self.ready: # If awaitable is ready or awaitable doesn't have a ready event
                     self.ready.send()
 
-    def _remove(self, msg):
+    def remove(self):
         """Remove this awaitable from the frame hierarchy.
 
         Returns:
@@ -856,7 +832,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
                 genexit = None
                 while self._children:
                     try:
-                        self._children[-1]._remove(GeneratorExit())
+                        self._children[-1].remove()
                     except GeneratorExit as err:
                         genexit = err # Delay raising GeneratorExit
 
@@ -878,7 +854,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
                         self._generator = None
 
                 # Remove awaitable
-                super()._remove(msg)
+                super().remove()
             finally:
                 self._remove_lock.release()
 
