@@ -51,6 +51,9 @@ class EventLoop(asyncframes.AbstractEventLoop, QObject, metaclass=EventLoopMeta)
     def _close(self):
         pass
 
+    def _clear(self):
+        pass
+
     def _post(self, delay, callback, args):
         QTimer.singleShot(1000 * delay, functools.partial(callback, *args))
     

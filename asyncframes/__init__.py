@@ -49,25 +49,105 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     def _run(self):
+        """Start the newly created or stopped event loop.
+
+        This method must be overwritten by the concrete eventloop class.
+
+        Events can be posted or invoked before the eventloop is started.
+        """
+
         raise NotImplementedError # pragma: no cover
+
     @abc.abstractmethod
     def _stop(self):
+        """Stop the running event loop.
+
+        This method must be overwritten by the concrete eventloop class.
+        """
+
         raise NotImplementedError # pragma: no cover
+
     @abc.abstractmethod
     def _close(self):
+        """Close the stopped event loop.
+
+        This method must be overwritten by the concrete eventloop class.
+
+        The eventloop will not be restarted and no events will be posted or invoked after this method is called.
+        """
+
         raise NotImplementedError # pragma: no cover
+
+    @abc.abstractmethod
+    def _clear(self):
+        """Clear all pending events from the stopped event loop.
+
+        This method must be overwritten by the concrete eventloop class.
+        """
+
+        raise NotImplementedError # pragma: no cover
+
     @abc.abstractmethod
     def _post(self, delay, callback, args):
+        """Execute the given callback after ``delay`` seconds.
+
+        This method must be overwritten by the concrete eventloop class.
+
+        This function is **not** threadsafe. It is only called from the thread that this eventloop was started on.
+        See :meth:`AbstractEventLoop._invoke` for the threadsafe version of this method.
+
+        Args:
+            delay (float): The time to wait before executing the callback.
+            callback (function): The function to be called.
+            args (tuple): The arguments to pass to the callback.
+        """
+
         raise NotImplementedError # pragma: no cover
+
+    @abc.abstractmethod
     def _invoke(self, delay, callback, args):
-        logging.warning("Thread-safe event posting not available for this event loop. Falling back to non-thread-safe event posting") # pragma: no cover
-        self._post(delay, callback, args) # pragma: no cover
+        """Execute the given callback after ``delay`` seconds.
+
+        This method must be overwritten by the concrete eventloop class.
+
+        This function **is** threadsafe. It can be called from any thread.
+        See :meth:`AbstractEventLoop._post` for the unsafe version of this method.
+
+        Args:
+            delay (float): The time to wait before executing the callback.
+            callback (function): The function to be called.
+            args (tuple): The arguments to pass to the callback.
+        """
+
+        raise NotImplementedError # pragma: no cover
+
     def _spawnthread(self, target, args):
-        thread = threading.Thread(target=target, args=args)
-        thread.daemon = True
+        """Create and start a daemonic worker thread.
+
+        By default, this will create and start a ``threading.Thread``.
+        The concrete eventloop class can overwrite this method to use a different threading model.
+
+        Args:
+            target (function): Same as the ``target`` argument of ``threading.Thread``.
+            args (tuple): Same as the ``args`` argument of ``threading.Thread``.
+
+        Returns:
+            The created thread.
+        """
+
+        thread = threading.Thread(target=target, args=args, daemon=True)
         thread.start()
         return thread
+
     def _jointhread(self, thread):
+        """Wait until the given thread terminates.
+
+        Only threads created with :meth:`AbstractEventLoop._spawnthread` are awaited with this method.
+
+        Args:
+            thread: The thread to wait for.
+        """
+
         thread.join()
 
     def __init__(self):
@@ -118,13 +198,19 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         finally:
             _THREAD_LOCALS._current_eventloop = None
             _THREAD_LOCALS._current_frame = None
-            self._idle = True
 
+            # Clear event queue
             while True:
                 try:
                     self.event_queue.get(False)
                 except queue.Empty:
                     break
+
+            # Clear main eventloop
+            self._clear()
+            self._idle = True
+
+            # Stop worker eventloops
             for eventloop in self.eventloops[1:]: eventloop._invoke(0, eventloop._stop, ())
             for worker in workers: self._jointhread(worker)
 

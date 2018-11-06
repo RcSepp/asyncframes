@@ -77,9 +77,6 @@ class TestAsyncFrames(unittest.TestCase):
             print()
             print("Using {}.{}".format(self.loop.__class__.__module__, self.loop.__class__.__name__))
             EVENTLOOP_CLASS = self.loop.__class__
-        
-        # Check if the event loop class implements AbstractEventLoop._invoke
-        self.supports_invoke = self.loop.__class__._invoke != AbstractEventLoop._invoke
 
         # Create logger for debugging program flow using time stamped log messages
         # Create time stamped log messages using self.log.debug(...)
@@ -526,18 +523,12 @@ class TestAsyncFrames(unittest.TestCase):
             sender, args = await ae
             test.log.debug("'%s' reraised '%s' with args '%s'", sender, ae, args)
 
-            if test.supports_invoke:
-                threading.Thread(target=invoke_event, args=(0.1, ae)).start()
-                threading.Thread(target=ae.post, args=((self, 'my event args'), 0.2)).start()
-                sender, args = await ae
-                test.log.debug("'%s' raised '%s' with args '%s'", sender, ae, args)
-                sender, args = await ae
-                test.log.debug("'%s' reraised '%s' with args '%s'", sender, ae, args)
-            else:
-                await sleep(0.1)
-                test.log.debug("'invoke_event' raised 'my event' with args 'my event args'")
-                await sleep(0.1)
-                test.log.debug("'main' reraised 'my event' with args 'my event args'")
+            threading.Thread(target=invoke_event, args=(0.1, ae)).start()
+            threading.Thread(target=ae.post, args=((self, 'my event args'), 0.2)).start()
+            sender, args = await ae
+            test.log.debug("'%s' raised '%s' with args '%s'", sender, ae, args)
+            sender, args = await ae
+            test.log.debug("'%s' reraised '%s' with args '%s'", sender, ae, args)
         @Frame
         async def send_event(self, seconds, awaitable_event):
             await sleep(seconds)
