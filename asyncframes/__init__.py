@@ -409,24 +409,24 @@ class Awaitable(collections.abc.Awaitable):
                         listener.ready.send(listener)
 
     def __and__(self, other):
-        """Register A & B as shortcut for all_(A, B)
+        """Register A & B as shortcut for ``all_(A, B)``.
 
         Args:
             other (Awaitable): The other awaitable.
 
         Returns:
-            all_: A frame awaiting `self` and `other`.
+            all\_: A frame awaiting `self` and `other`.
         """
 
         return all_(self, other)
     def __or__(self, other):
-        """Register A | B as shortcut for any_(A, B)
+        """Register A | B as shortcut for ``any_(A, B)``.
 
         Args:
             other (Awaitable): The other awaitable.
 
         Returns:
-            any_: A frame awaiting `self` and `other`.
+            any\_: A frame awaiting `self` or `other`.
         """
 
         return any_(self, other)
