@@ -218,23 +218,23 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         if len(self.eventloops) == 1: # If running singlethreaded, ...
             # Execute callback from current eventloop
             if _THREAD_LOCALS._current_eventloop == self:
-                self._post(delay, callback, (eventloop_affinity, ) + args)
+                self._post(delay, callback, args)
             else:
-                self._invoke(delay, callback, (eventloop_affinity, ) + args)
+                self._invoke(delay, callback, args)
         elif eventloop_affinity: # If a target eventloop was provided, ...
             # Execute callback from target eventloop
             if _THREAD_LOCALS._current_eventloop == eventloop_affinity:
-                eventloop_affinity._post(delay, callback, (eventloop_affinity, ) + args)
+                eventloop_affinity._post(delay, callback, args)
             else:
-                eventloop_affinity._invoke(delay, callback, (eventloop_affinity, ) + args)
+                eventloop_affinity._invoke(delay, callback, args)
         else: # If no target eventloop was provided, ...
             if delay > 0.0:
                 # Call _enqueue again with 0 delay after 'delay' seconds
                 #TODO: Consider running a dedicated event loop instead of eventloops[-1] for delays
                 if _THREAD_LOCALS._current_eventloop == self.eventloops[-1]:
-                    self.eventloops[-1]._post(delay, self._enqueue, (0.0, callback, args))
+                    self.eventloops[-1]._post(delay, self.eventloops[-1]._enqueue, (0.0, callback, args))
                 else:
-                    self.eventloops[-1]._invoke(delay, self._enqueue, (0.0, callback, args))
+                    self.eventloops[-1]._invoke(delay, self.eventloops[-1]._enqueue, (0.0, callback, args))
             else: # If delay == 0, ...
                 # Place the callback on the event queue
                 self.event_queue.put((callback, args))
@@ -252,13 +252,14 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         except queue.Empty:
             self._idle = True
         else:
-            callback(self, *args)
+            callback(*args)
             if not self.event_queue.empty():
                 self._post(0, self._dequeue, ())
             else:
                 self._idle = True
 
-    def sendevent(self, eventsource, event):
+    @staticmethod
+    def sendevent(eventsource, event):
         # Save current frame, since it will be modified inside Awaitable.process()
         currentframe = _THREAD_LOCALS._current_frame
 
@@ -496,7 +497,7 @@ class Event(Awaitable):
             args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event.
         """
 
-        _THREAD_LOCALS._current_eventloop.sendevent(self, args)
+        AbstractEventLoop.sendevent(self, args)
 
     def post(self, args=None, delay=0):
         """Enqueue an event in the event loop.
@@ -843,7 +844,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
             if inspect.isawaitable(self._generator): # If framefunc is a coroutine
                 if self.startup_behaviour == FrameStartupBehaviour.delayed:
                     # Post coroutine to the event queue
-                    _THREAD_LOCALS._current_eventloop._enqueue(0.0, AbstractEventLoop.sendevent, (self, None), self._eventloop_affinity)
+                    _THREAD_LOCALS._current_eventloop.postevent(self, None, 0.0)
                 elif self.startup_behaviour == FrameStartupBehaviour.immediate:
                     # Start coroutine
                     try:
