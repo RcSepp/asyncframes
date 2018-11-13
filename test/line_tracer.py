@@ -25,6 +25,8 @@ class Trace(object):
             "EventLoop.<listcomp>",
             "Frame.__init__",
             "Event.__init__",
+            "Event.__bool__",
+            "Event.send",
             "Frame.removed"
         ])
     }
