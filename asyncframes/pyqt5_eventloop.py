@@ -52,7 +52,7 @@ class EventLoop(asyncframes.AbstractEventLoop, QObject, metaclass=EventLoopMeta)
         pass
 
     def _clear(self):
-        pass
+        EventLoop.qt.removePostedEvents(None)
 
     def _post(self, delay, callback, args):
         QTimer.singleShot(1000 * delay, functools.partial(callback, *args))
