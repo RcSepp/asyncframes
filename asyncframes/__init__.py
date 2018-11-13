@@ -952,9 +952,10 @@ class Frame(Awaitable, metaclass=FrameMeta):
         return False
 
 class PFrame(Frame):
-    def __init__(self, startup_behaviour=FrameStartupBehaviour.delayed):
-        super().__init__(startup_behaviour)
-        self._eventloop_affinity = None
+    def __init__(self, startup_behaviour=FrameStartupBehaviour.delayed, thread_idx=None):
+        super().__init__(startup_behaviour, thread_idx)
+        if thread_idx is None:
+            self._eventloop_affinity = None
 
 
 class Primitive(object):
