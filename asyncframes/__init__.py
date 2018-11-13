@@ -371,7 +371,7 @@ class Awaitable(collections.abc.Awaitable):
             bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
         """
 
-        remove_event = Event(str(self.__name__) + ".remove", autoremove=True)
+        remove_event = Event(str(self.__name__) + ".remove", singleshot=True)
         process_counter = _AtomicCounter(1, lambda result: AbstractEventLoop.sendevent(remove_event, result, None, True)) # Add process: Frame.remove
         process_counter.on_zero_args = (True,) # Default remove() result to True
         process_counter.on_zero_args = (self._remove(process_counter, False),)
@@ -495,24 +495,24 @@ class Event(Awaitable):
 
     Args:
         name (str): The name of the event.
-        autoremove (bool, optional): Defaults to False. If `True`, removes the event after it has been woken.
+        singleshot (bool, optional): Defaults to False. If `True`, removes the event after it has been woken.
     """
 
-    def __init__(self, name, autoremove=False):
+    def __init__(self, name, singleshot=False):
         super().__init__(name)
-        self.autoremove = autoremove
+        self.singleshot = singleshot
         self.eventloop = _THREAD_LOCALS._current_eventloop # Store creating eventloop, as a fallback in case self.post() is called from a thread without an eventloop
 
     def _remove(self, process_counter=None, blocking=False):
         """Remove this awaitable from the frame hierarchy.
 
-        If `autoremove` is False, this function is supressed
+        If `singleshot` is False, this function is supressed
 
         Returns:
             bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
         """
         
-        if self.autoremove:
+        if self.singleshot:
             return super()._remove(process_counter, blocking)
         else:
             # Wake up listeners
@@ -558,7 +558,7 @@ class Event(Awaitable):
             args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event.
         """
 
-        send_event = Event(str(self.__name__) + ".send", autoremove=True)
+        send_event = Event(str(self.__name__) + ".send", singleshot=True)
         process_counter = _AtomicCounter(1, lambda: AbstractEventLoop.sendevent(send_event, None, None, True))
         AbstractEventLoop.sendevent(self, args, process_counter, True)
         return send_event
@@ -722,7 +722,7 @@ class sleep(Event):
     """
 
     def __init__(self, seconds=0.0):
-        super().__init__("sleep({})".format(seconds), autoremove=True)
+        super().__init__("sleep({})".format(seconds), singleshot=True)
 
         # Raise event
         self.post(None, max(0, seconds))
@@ -735,7 +735,7 @@ class hold(Event):
     """
 
     def __init__(self):
-        super().__init__("hold()", autoremove=True)
+        super().__init__("hold()", singleshot=True)
     def step(self, sender, msg):
         """ Ignore any incoming events."""
 
@@ -751,7 +751,7 @@ class animate(Event):
     """
 
     def __init__(self, seconds, callback, interval=0.0):
-        super().__init__("animate()", autoremove=True)
+        super().__init__("animate()", singleshot=True)
         self.seconds = seconds
         self.callback = callback
         self.interval = interval
