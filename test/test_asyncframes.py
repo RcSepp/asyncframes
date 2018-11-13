@@ -35,10 +35,11 @@ TRACE_MODE = line_tracer.Trace.Mode.on_error
 
 class nullcontext(object):
     """A context manager that does nothing.
-    
+
     See https://docs.python.org/3/library/contextlib.html#contextlib.nullcontext
     Implemented here for Python versions before 3.7
     """
+
     def __init__(self, enter_result=None):
         self.enter_result = enter_result
     def __enter__(self):
@@ -368,24 +369,56 @@ class TestAsyncFrames(unittest.TestCase):
 
     def test_remove_self(self):
         test = self
-        # @Frame
-        # def frame(self):
-        #     test.log.debug("1")
-        #     self.remove()
-        #     test.log.debug("2") # Frame.remove() doesn't interrupt regular frame functions
-        # test.run_frame(frame, expected_log="""
-        #     0.0: 1
-        #     0.0: 2
-        #     0.0: done
-        # """)
+        @Frame
+        def frame(self):
+            test.log.debug("1")
+            self.remove()
+            test.log.debug("2") # Frame.remove() doesn't interrupt regular frame functions
+        test.run_frame(frame, expected_log="""
+            0.0: 1
+            0.0: 2
+            0.0: done
+        """)
         @Frame
         async def async_frame(self):
-            test.log.debug("3")
+            test.log.debug("1")
             self.remove()
             test.log.debug("never reached") # Frame.remove() interrupts async frame functions
         test.run_frame(async_frame, expected_log="""
-            0.0: 3
+            0.0: 1
             0.0: done
+        """)
+
+    def test_pframe_remove(self):
+        """Test removing self after handling a free event on another thread.
+
+        Expected behaviour:
+        After waking all frames that wait for frame_a.free, frame_a.remove
+        should terminate frame_a's coroutine by raising GeneratorExit.
+
+        Faced issue:
+        After handling frame_a.free inside frame_b, frame_a raises GeneratorExit
+        from thread 3. GeneratorExit should instead be raised from the thread
+        that frame_a's coroutine is running on (thread 2).
+        """
+
+        test = self
+        @Frame(thread_idx=2)
+        async def frame_a(self):
+            time.sleep(0.1)
+            r = self.remove()
+            time.sleep(0.1)
+            await r
+            test.log.debug("never reached") # Frame.remove() interrupts async frame functions
+        @Frame(thread_idx=3)
+        async def frame_b(a):
+            await a.free
+        @Frame(thread_idx=1)
+        async def main(self):
+            a = frame_a()
+            await (a & frame_b(a))
+        test.run_frame(main, expected_log="""
+            0.2: done
         """)
 
     def test_reremove(self):
@@ -397,7 +430,7 @@ class TestAsyncFrames(unittest.TestCase):
         async def remove_after(frame, seconds):
             await sleep(seconds)
             test.log.debug('Removing frame')
-            frame.remove()
+            test.assertEqual(await frame.remove(), True)
         @Frame
         async def main(self):
             self.p = None
@@ -412,22 +445,22 @@ class TestAsyncFrames(unittest.TestCase):
             a = (self.free | sleep(0.1))
             await a
             test.log.debug('Re-removing any_')
-            test.assertEqual(a.remove(), False)
+            test.assertEqual(await a.remove(), False)
 
             s = sleep(0.1)
             a = (self.free & s)
             await a
             test.log.debug('Re-removing all_')
-            test.assertEqual(a.remove(), False)
+            test.assertEqual(await a.remove(), False)
 
             test.log.debug('Re-removing event source')
-            test.assertEqual(s.remove(), False)
+            test.assertEqual(await s.remove(), False)
 
             test.log.debug('Re-removing primitive')
             test.assertEqual(self.p.remove(), False)
 
             test.log.debug('Re-removing frame')
-            test.assertEqual(self.remove(), False)
+            test.assertEqual(await self.remove(), False)
         test.run_frame(main, expected_log="""
             0.0: Removing primitive
             0.1: Re-removing any_
@@ -759,8 +792,12 @@ class TestAsyncFrames(unittest.TestCase):
                         test.log.debug('frame4 ready')
                         await sleep()
                     test.log.debug('frame3 ready')
+                    #TODO: Implement ready propagation through all_
+                    # e.g.: await (frame4() & frame4() & sleep())
                     await frame4()
                 test.log.debug('frame2 ready')
+                #TODO: Implement ready propagation through any_
+                # e.g.: await (frame3() | hold())
                 await frame3()
             test.log.debug('frame1 ready')
             await frame2()
@@ -904,68 +941,81 @@ class TestAsyncFrames(unittest.TestCase):
             test.assertEqual(p2.removed, True)
         test.run_frame(main)
 
-    @unittest.skip('Not yet working')
+    def test_await_send(self):
+        test = self
+        @Frame(thread_idx=2)
+        async def a(event):
+            await event
+            test.log.debug(1)
+
+        @Frame(thread_idx=3)
+        async def b(event):
+            await a(event)
+
+        @Frame
+        async def main():
+            event = Event("TODO")
+            b(event)
+            b(event)
+            await sleep(0.1)
+            await event.send()
+            test.log.debug(2)
+        test.run_frame(main, expected_log="""
+            0.1: 1
+            0.1: 1
+            0.1: 2
+            0.1: done
+        """)
+
     def test_send_across_threads(self):
         test = self
         @Frame(thread_idx=2)
         async def frame1(e):
-            print("frame1 (eventloop {}) awaits e".format(get_current_eventloop_index()))
             await e
-            print("frame1 (eventloop {}) woke up".format(get_current_eventloop_index()))
             test.log.debug('1')
         @Frame(thread_idx=3)
         async def frame2(e):
-            print("frame2 (eventloop {}) wakes up e".format(get_current_eventloop_index()))
-            e.send()
-            print("frame2 (eventloop {}) continues".format(get_current_eventloop_index()))
+            await e.send()
             test.log.debug('2')
         @Frame
         async def main(self):
-            print('----------')
             e = Event('my_event')
             f1 = frame1(e)
             await f1.ready
             f2 = frame2(e)
-            await f1
+            await (f1 & f2)
         test.run_frame(main, expected_log="""
             0.0: 1
             0.0: 2
             0.0: done
         """)
 
-    @unittest.skip('Not yet working')
     def test_ready_across_threads(self):
         test = self
         @Frame(thread_idx=2)
         async def frame1():
             time.sleep(0.1)
             test.log.debug('2')
-            print(2)
-            await sleep()
+            await sleep(0.1)
             test.log.debug('4')
-            print(4)
         @Frame(thread_idx=3)
         async def frame2(f1):
             test.log.debug('1')
-            print(1)
             await f1.ready
-            time.sleep(0.1)
             test.log.debug('3')
-            print(3)
         @Frame
         async def main(self):
-            print('----------')
             f1 = frame1()
-            await frame2(f1)
+            f2 = frame2(f1)
+            await (f1 & f2)
         test.run_frame(main, expected_log="""
             0.0: 1
             0.1: 2
-            0.2: 3
+            0.1: 3
             0.2: 4
             0.2: done
         """)
 
-    @unittest.skip('Not yet working')
     def test_free_across_threads(self):
         """Test awaiting the free event from a thread different than the one
         from the removed frame.
@@ -993,18 +1043,14 @@ class TestAsyncFrames(unittest.TestCase):
         async def frame1():
             await sleep(0.1)
             test.log.debug('2')
-            print(2)
         @Frame(thread_idx=3)
         async def frame2(f1):
             test.log.debug('1')
-            print(1)
             await f1.free
             time.sleep(0.1)
             test.log.debug('3 ' + str(f1.removed))
-            print(3, f1.removed)
         @Frame
         async def main(self):
-            print('----------')
             f1 = frame1()
             await frame2(f1)
         test.run_frame(main, expected_log="""
@@ -1012,6 +1058,31 @@ class TestAsyncFrames(unittest.TestCase):
             0.1: 2
             0.2: 3 False
             0.2: done
+        """)
+
+    def test_remove_across_threads(self):
+        """Test removing a frame from another thread."""
+
+        test = self
+        @Frame(thread_idx=2)
+        async def frame1(self):
+            await self.free
+            test.log.debug('2 ' + str(self.removed))
+        @Frame(thread_idx=3)
+        async def frame2(f1):
+            test.log.debug(1)
+            time.sleep(0.1)
+            await f1.remove()
+            test.log.debug(3)
+        @Frame
+        async def main(self):
+            f1 = frame1()
+            await frame2(f1)
+        test.run_frame(main, expected_log="""
+            0.0: 1
+            0.1: 2 False
+            0.1: 3
+            0.1: done
         """)
 
     @unittest.skip('Not yet working')
@@ -1034,20 +1105,15 @@ class TestAsyncFrames(unittest.TestCase):
         async def frame1(self):
             await sleep(0.1)
             test.log.debug('2')
-            print(2)
             await self.free
             test.log.debug('3')
-            print(3)
         @Frame(thread_idx=3)
         async def frame2(f1):
             test.log.debug('1')
-            print(1)
-            f1.remove()
+            await f1.remove()
             test.log.debug('4 ' + str(f1.removed))
-            print(4, f1.removed)
         @Frame
         async def main(self):
-            print('----------')
             f1 = frame1()
             await frame2(f1)
         test.run_frame(main, expected_log="""

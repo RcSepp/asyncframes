@@ -44,6 +44,36 @@ class InvalidOperationException(Exception):
     def __init__(self, msg):
         super().__init__(msg)
 
+class _AtomicCounter(object):
+    """A thread-safe counter that calls a function whenever it hits zero.
+
+        Args:
+            initial_value (int): The initial counter value.
+            on_zero (Callable): The function to call whenever the counter hits zero.
+        """
+
+    def __init__(self, initial_value, on_zero):
+        self._lock = threading.Lock()
+        self._value = initial_value
+        self.on_zero = on_zero
+        self.on_zero_args = ()
+
+    def add(self, f):
+        """Increment the counter by the given amount."""
+
+        with self._lock:
+            self._value += f
+            if self._value != 0: return
+        self.on_zero(*self.on_zero_args)
+
+    def sub(self, f):
+        """Decrement the counter by the given amount."""
+
+        with self._lock:
+            self._value -= f
+            if self._value != 0: return
+        self.on_zero(*self.on_zero_args)
+
 class AbstractEventLoop(metaclass=abc.ABCMeta):
     """Abstract base class of event loops."""
 
@@ -259,22 +289,20 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
                 self._idle = True
 
     @staticmethod
-    def sendevent(eventsource, event):
+    def sendevent(eventsource, event, process_counter=None, blocking=False):
         # Save current frame, since it will be modified inside Awaitable.process()
         currentframe = _THREAD_LOCALS._current_frame
 
         try:
-            eventsource.process(eventsource, event)
-        except GeneratorExit:
-            pass # Catch any leaked GeneratorExit's (This can happen when a thread tries to cancel another thread's coroutine by raising GeneratorExit)
+            eventsource.process(eventsource, event, process_counter, blocking)
         finally:
             # Restore current frame
             _THREAD_LOCALS._current_frame = currentframe
 
     def postevent(self, eventsource, event, delay=0):
-        self._enqueue(delay, AbstractEventLoop.sendevent, (eventsource, event), eventsource._eventloop_affinity)
+        self._enqueue(delay, AbstractEventLoop.sendevent, (eventsource, event, None, False), eventsource._eventloop_affinity)
 
-    def process(self, sender, msg):
+    def process(self, sender, msg, process_counter=None, blocking=False):
         self._result = msg
         self._stop() # Stop event loop
 
@@ -299,7 +327,7 @@ class Awaitable(collections.abc.Awaitable):
         self._eventloop_affinity = None
         self.exception_handler = None
 
-    def remove(self):
+    def _remove(self, process_counter=None, blocking=False):
         """Remove this awaitable from the frame hierarchy.
 
         Returns:
@@ -319,14 +347,36 @@ class Awaitable(collections.abc.Awaitable):
         if self._listeners:
             listeners = self._listeners
             self._listeners = set()
-            for listener in listeners:
-                if listener._eventloop_affinity is None or listener._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
-                    listener.process(self, self._result)
-                else:
-                    listener._eventloop_affinity._invoke(0, listener.process, (self, self._result))
+
+            if process_counter is not None:
+                process_counter.add(len(listeners))
+
+            if blocking:
+                for listener in listeners:
+                    if listener._eventloop_affinity is None or listener._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
+                        listener.process(self, self._result, process_counter, blocking)
+                    else:
+                        listener._eventloop_affinity._invoke(0, listener.process, (self, self._result, process_counter, blocking))
+            else:
+                for listener in listeners:
+                    _THREAD_LOCALS._current_eventloop._enqueue(0, listener.process, (self, self._result, process_counter, blocking), listener._eventloop_affinity)
 
         del self
         return True
+
+    def remove(self):
+        """Remove this awaitable from the frame hierarchy.
+
+        Returns:
+            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
+        """
+
+        remove_event = Event(str(self.__name__) + ".remove", autoremove=True)
+        process_counter = _AtomicCounter(1, lambda result: AbstractEventLoop.sendevent(remove_event, result, None, True)) # Add process: Frame.remove
+        process_counter.on_zero_args = (True,) # Default remove() result to True
+        process_counter.on_zero_args = (self._remove(process_counter, False),)
+        process_counter.sub(1) # Remove process: Frame.remove
+        return remove_event
 
     @property
     def removed(self):
@@ -339,7 +389,7 @@ class Awaitable(collections.abc.Awaitable):
 
     def __repr__(self):
         return "<{}.{} object at 0x{:x}>".format(self.__module__, self.__name__, id(self))
-    
+
     def __lt__(self, other):
         """Make awaitables sortable by name."""
         return self.__name__ < other.__name__
@@ -356,7 +406,7 @@ class Awaitable(collections.abc.Awaitable):
     def step(self, sender, msg):
         raise NotImplementedError # pragma: no cover
 
-    def process(self, sender, msg):
+    def process(self, sender, msg, process_counter=None, blocking=False):
         """Propagate an event from its source and along awaiting nodes through the frame hierarchy.
 
         Args:
@@ -372,7 +422,7 @@ class Awaitable(collections.abc.Awaitable):
                 # Send ready event to all listeners that have a ready event, but aren't ready yet
                 for listener in self._listeners:
                     if not getattr(listener, 'ready', True):
-                        listener.ready.send(listener)
+                        AbstractEventLoop.sendevent(listener.ready, None, None, True)
 
             # Store result
             if type(err) == StopIteration:
@@ -401,13 +451,16 @@ class Awaitable(collections.abc.Awaitable):
                             maineventloop._eventloop_affinity._invoke(0, maineventloop._stop, ())
 
             # Remove awaitable and propagate event
-            self.remove()
+            self._remove(process_counter, blocking)
         else:
             if getattr(self, 'ready', True): # If self is ready or self doesn't have a ready event
                 # Send ready event to all listeners that have a ready event, but aren't ready yet
                 for listener in self._listeners:
                     if not getattr(listener, 'ready', True):
-                        listener.ready.send(listener)
+                        AbstractEventLoop.sendevent(listener.ready, None, None, True)
+
+        if process_counter:
+            process_counter.sub(1)
 
     def __and__(self, other):
         """Register A & B as shortcut for ``all_(A, B)``.
@@ -450,7 +503,7 @@ class Event(Awaitable):
         self.autoremove = autoremove
         self.eventloop = _THREAD_LOCALS._current_eventloop # Store creating eventloop, as a fallback in case self.post() is called from a thread without an eventloop
 
-    def remove(self):
+    def _remove(self, process_counter=None, blocking=False):
         """Remove this awaitable from the frame hierarchy.
 
         If `autoremove` is False, this function is supressed
@@ -460,17 +513,25 @@ class Event(Awaitable):
         """
         
         if self.autoremove:
-            return super().remove()
+            return super()._remove(process_counter, blocking)
         else:
             # Wake up listeners
             if self._listeners:
                 listeners = self._listeners
                 self._listeners = set()
-                for listener in listeners:
-                    if listener._eventloop_affinity is None or listener._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
-                        listener.process(self, self._result)
-                    else:
-                        listener._eventloop_affinity._invoke(0, listener.process, (self, self._result))
+
+                if process_counter is not None:
+                    process_counter.add(len(listeners))
+
+                if blocking:
+                    for listener in listeners:
+                        if listener._eventloop_affinity is None or listener._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
+                            listener.process(self, self._result, process_counter, blocking)
+                        else:
+                            listener._eventloop_affinity._invoke(0, listener.process, (self, self._result, process_counter, blocking))
+                else:
+                    for listener in listeners:
+                        _THREAD_LOCALS._current_eventloop._enqueue(0, listener.process, (self, self._result, process_counter, blocking), listener._eventloop_affinity)
 
     def __bool__(self):
         return self._removed
@@ -497,7 +558,10 @@ class Event(Awaitable):
             args (optional): Defaults to None. Event arguments, for example, the progress value on a progress-update event.
         """
 
-        AbstractEventLoop.sendevent(self, args)
+        send_event = Event(str(self.__name__) + ".send", autoremove=True)
+        process_counter = _AtomicCounter(1, lambda: AbstractEventLoop.sendevent(send_event, None, None, True))
+        AbstractEventLoop.sendevent(self, args, process_counter, True)
+        return send_event
 
     def post(self, args=None, delay=0):
         """Enqueue an event in the event loop.
@@ -530,7 +594,7 @@ class all_(Awaitable):
                 awaitable._listeners.add(self)
 
         if not self._awaitables:
-            self.remove()
+            self._remove()
             return
 
         self._parent = _THREAD_LOCALS._current_frame
@@ -557,7 +621,7 @@ class all_(Awaitable):
             stop.value = self._result
             raise stop
 
-    def remove(self):
+    def _remove(self, process_counter=None, blocking=False):
         """Remove this awaitable from the frame hierarchy.
 
         Returns:
@@ -576,7 +640,7 @@ class all_(Awaitable):
             self._awaitables.clear()
 
             # Remove awaitable
-            super().remove()
+            super()._remove(process_counter, blocking)
 
             return True
         return False
@@ -596,7 +660,7 @@ class any_(Awaitable):
         for awaitable in awaitables:
             if awaitable.removed:
                 self._result = (awaitable, awaitable._result)
-                self.remove()
+                self._remove()
                 return
             else:
                 self._awaitables.add(awaitable)
@@ -622,7 +686,7 @@ class any_(Awaitable):
         stop.value = (sender, msg)
         raise stop
 
-    def remove(self):
+    def _remove(self, process_counter=None, blocking=False):
         """Remove this awaitable from the frame hierarchy.
 
         Returns:
@@ -641,7 +705,7 @@ class any_(Awaitable):
             self._awaitables.clear()
 
             # Remove awaitable
-            super().remove()
+            super()._remove(process_counter, blocking)
 
             return True
         return False
@@ -816,6 +880,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
         self._activechild = None
         self._primitives = []
         self._generator = None
+        self._generator_eventloop = None
         self.ready = Event(str(self.__name__) + ".ready", True)
         self.free = Event(str(self.__name__) + ".free", True)
         self._eventloop_affinity = _THREAD_LOCALS._current_eventloop
@@ -879,21 +944,25 @@ class Frame(Awaitable, metaclass=FrameMeta):
             raise stop
 
         if self._generator is not None:
+            self._generator_eventloop = _THREAD_LOCALS._current_eventloop
             try:
                 awaitable = self._generator.send(msg) # Continue coroutine
             except (StopIteration, GeneratorExit): # If frame finished
-                if msg is None: self.ready.send() # Send ready event if frame finished without ever being awaited
+                self._generator_eventloop = None
+                if msg is None: AbstractEventLoop.sendevent(self.ready, None, None, True) # Send ready event if frame finished without ever being awaited
                 raise # Propagate event
             except Exception as err: # If frame raised exception
+                self._generator_eventloop = None
                 raise # Propagate event
             else: # If frame awaits awaitable
+                self._generator_eventloop = None
                 awaitable._listeners.add(self) # Listen to events of awaitable
 
                 # Send ready event if not yet ready and awaitable is ready or doesn't have a ready event
                 if getattr(awaitable, 'ready', True) and not self.ready: # If awaitable is ready or awaitable doesn't have a ready event
-                    self.ready.send()
+                    AbstractEventLoop.sendevent(self.ready, None, None, True)
 
-    def remove(self):
+    def _remove(self, process_counter=None, blocking=False):
         """Remove this awaitable from the frame hierarchy.
 
         Returns:
@@ -903,23 +972,26 @@ class Frame(Awaitable, metaclass=FrameMeta):
         if self.removed:
             return False
 
+        if process_counter:
+            process_counter.add(1) # Add process: Frame._remove_stage2
+
         # Send frame free event
-        self.free.send()
+        free_process_counter = _AtomicCounter(1, self._remove_stage2)
+        free_process_counter.on_zero_args = (process_counter, blocking)
+        AbstractEventLoop.sendevent(self.free, None, free_process_counter, True)
+        return True
 
-        if self.removed: # If this frame was closed in response to the free event, ...
-            return False
-
-        if self._remove_lock.acquire(blocking=False):
-            if self.removed: # If this frame was closed while acquiring the lock, ...
-                self._remove_lock.release()
-                return False
-
+    def _remove_stage2(self, process_counter=None, blocking=False):
+        if self.removed or not self._remove_lock.acquire(blocking=False): # If this frame was closed in response to the free event or removal is already in progress, ...
+            if process_counter:
+                process_counter.sub(1) # Remove process: Frame._remove_stage2
+        else:
             try:
                 # Remove child frames
                 genexit = None
                 while self._children:
                     try:
-                        self._children[-1].remove()
+                        self._children[-1]._remove(process_counter, blocking)
                     except GeneratorExit as err:
                         genexit = err # Delay raising GeneratorExit
 
@@ -929,27 +1001,42 @@ class Frame(Awaitable, metaclass=FrameMeta):
 
                 # Stop framefunc
                 if self._generator: # If framefunc is a coroutine
-                    if self._generator.cr_running:
+                    genevtlp = self._generator_eventloop # Avoid race condition between if and invoke
+                    if genevtlp == _THREAD_LOCALS._current_eventloop: # If the coroutine is running on the current eventloop
                         # Calling coroutine.close() from within the coroutine is illegal, so we throw a GeneratorExit manually instead
                         try:
                             self._generator.close()
                         except ValueError:
                             genexit = GeneratorExit()
                         self._generator = None
-                    else:
+                    elif genevtlp is not None: # If the coroutine is running on another eventloop
+                        if process_counter:
+                            process_counter.add(1) # Add process: Frame._remove_stage3
+                        genevtlp._invoke(0, self._remove_stage3, (process_counter,))
+                    else: # If the coroutine isn't running
                         self._generator.close()
                         self._generator = None
 
                 # Remove awaitable
-                super().remove()
+                super()._remove(process_counter, blocking)
             finally:
                 self._remove_lock.release()
+
+                if process_counter:
+                    process_counter.sub(1) # Remove process: Frame._remove_stage2
 
                 # Raise delayed GeneratorExit exception
                 if genexit:
                     raise genexit
-                return True
-        return False
+
+    def _remove_stage3(self, process_counter=None):
+        genevtlp = self._generator_eventloop # Avoid race condition between if and invoke
+        if genevtlp is None or genevtlp == _THREAD_LOCALS._current_eventloop: # If the coroutine isn't running or it's running on the current eventloop
+            self._generator.close()
+            if process_counter:
+                process_counter.sub(1) # Remove process: Frame._remove_stage3
+        else: # If the coroutine is running on another eventloop
+            genevtlp._invoke(0, self._remove_stage3, (process_counter,))
 
 class PFrame(Frame):
     def __init__(self, startup_behaviour=FrameStartupBehaviour.delayed, thread_idx=None):
