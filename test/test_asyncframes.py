@@ -835,6 +835,27 @@ class TestAsyncFrames(unittest.TestCase):
             0.1: done
         """)
 
+    def test_cancel_free(self):
+        test = self
+        @Frame
+        async def frame():
+            sf = subframe()
+            await sf.ready
+            test.log.debug(await sf.remove())
+            test.log.debug(await sf.remove())
+            test.log.debug(await sf.remove())
+        @Frame
+        async def subframe(self):
+            f = await self.free
+            f.cancel = True
+            await self.free
+        test.run_frame(frame, expected_log="""
+            0.0: False
+            0.0: True
+            0.0: False
+            0.0: done
+        """)
+
     def test_delayed_await(self):
         test = self
         @Frame

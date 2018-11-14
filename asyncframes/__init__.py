@@ -18,8 +18,9 @@ import warnings
 
 __all__ = [
     'all_', 'animate', 'any_', 'Awaitable', 'AbstractEventLoop', 'Event',
-    'find_parent', 'Frame', 'FrameStartupBehaviour', 'get_current_eventloop_index',
-    'InvalidOperationException', 'hold', 'PFrame', 'Primitive', 'sleep'
+    'find_parent', 'Frame', 'FrameStartupBehaviour', 'FreeEventArgs',
+    'get_current_eventloop_index', 'InvalidOperationException', 'hold',
+    'PFrame', 'Primitive', 'sleep'
 ]
 __version__ = '1.1.0'
 
@@ -43,6 +44,10 @@ class InvalidOperationException(Exception):
 
     def __init__(self, msg):
         super().__init__(msg)
+
+class FreeEventArgs(object):
+    def __init__(self):
+        self.cancel = False
 
 class _AtomicCounter(object):
     """A thread-safe counter that calls a function whenever it hits zero.
@@ -882,7 +887,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
         self._generator = None
         self._generator_eventloop = None
         self.ready = Event(str(self.__name__) + ".ready", True)
-        self.free = Event(str(self.__name__) + ".free", True)
+        self.free = Event(str(self.__name__) + ".free", False)
         self._eventloop_affinity = _THREAD_LOCALS._current_eventloop
         if thread_idx is not None:
             self._eventloop_affinity = self._eventloop_affinity.eventloops[thread_idx]
@@ -976,13 +981,14 @@ class Frame(Awaitable, metaclass=FrameMeta):
             process_counter.add(1) # Add process: Frame._remove_stage2
 
         # Send frame free event
+        free_args = FreeEventArgs()
         free_process_counter = _AtomicCounter(1, self._remove_stage2)
-        free_process_counter.on_zero_args = (process_counter, blocking)
-        AbstractEventLoop.sendevent(self.free, None, free_process_counter, True)
-        return True
+        free_process_counter.on_zero_args = (free_args, process_counter, blocking)
+        AbstractEventLoop.sendevent(self.free, free_args, free_process_counter, True)
+        return not free_args.cancel
 
-    def _remove_stage2(self, process_counter=None, blocking=False):
-        if self.removed or not self._remove_lock.acquire(blocking=False): # If this frame was closed in response to the free event or removal is already in progress, ...
+    def _remove_stage2(self, free_args, process_counter=None, blocking=False):
+        if free_args.cancel or self.removed or not self._remove_lock.acquire(blocking=False): # If free was canceled, this frame was closed in response to the free event or removal is already in progress, ...
             if process_counter:
                 process_counter.sub(1) # Remove process: Frame._remove_stage2
         else:
