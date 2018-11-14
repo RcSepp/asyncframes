@@ -1106,44 +1106,6 @@ class TestAsyncFrames(unittest.TestCase):
             0.1: done
         """)
 
-    @unittest.skip('Not yet working')
-    def test_delayed_await_free(self):
-        """Test removing a frame before the free event is being awaited.
-
-        Expected behaviour:
-        If a frame is removed, removal is suspended until any frames awaiting
-        the free event of the removed frame await another awaitable or finish.
-        If any awaitables, besides auto-resetting events, are awaited after the
-        event was emitted, they wake up immediately. Accordingly, awaiting free
-        should suspend frame removal, even if free is only awaited after the
-        removal was issued. This behaviour assures that cleanup code is always
-        executed before frame removal, even if the frame was busy while frame
-        removal was initiated.
-        """
-
-        test = self
-        @Frame(thread_idx=2)
-        async def frame1(self):
-            await sleep(0.1)
-            test.log.debug('2')
-            await self.free
-            test.log.debug('3')
-        @Frame(thread_idx=3)
-        async def frame2(f1):
-            test.log.debug('1')
-            await f1.remove()
-            test.log.debug('4 ' + str(f1.removed))
-        @Frame
-        async def main(self):
-            f1 = frame1()
-            await frame2(f1)
-        test.run_frame(main, expected_log="""
-            0.0: 1
-            0.1: 2
-            0.2: 3 False
-            0.2: done
-        """)
-
     def test_thread_independence(self):
         test = self
         errors = queue.Queue()
