@@ -789,16 +789,20 @@ class TestAsyncFrames(unittest.TestCase):
                 async def frame3():
                     @Frame
                     async def frame4():
+                        @Frame
+                        async def frame5():
+                            test.log.debug('frame5 ready')
+                            await sleep()
                         test.log.debug('frame4 ready')
-                        await sleep()
+                        #TODO: Implement ready propagation through all_
+                        # e.g.: await (frame5() & frame5() & sleep())
+                        await frame5()
                     test.log.debug('frame3 ready')
-                    #TODO: Implement ready propagation through all_
-                    # e.g.: await (frame4() & frame4() & sleep())
+                    #TODO: Implement ready propagation through any_
+                    # e.g.: await (frame4() | hold())
                     await frame4()
                 test.log.debug('frame2 ready')
-                #TODO: Implement ready propagation through any_
-                # e.g.: await (frame3() | hold())
-                await frame3()
+                await frame3().ready
             test.log.debug('frame1 ready')
             await frame2()
         @Frame
@@ -809,6 +813,7 @@ class TestAsyncFrames(unittest.TestCase):
             0.0: frame2 ready
             0.0: frame3 ready
             0.0: frame4 ready
+            0.0: frame5 ready
             0.0: done
         """)
 

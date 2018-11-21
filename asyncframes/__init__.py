@@ -887,6 +887,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
         self._generator = None
         self._generator_eventloop = None
         self.ready = Event(str(self.__name__) + ".ready", True)
+        self.ready.ready = self.ready # Set ready state of ready event to itself. This way the ready event will propagate through `await frame.ready`
         self.free = Event(str(self.__name__) + ".free", False)
         self._eventloop_affinity = _THREAD_LOCALS._current_eventloop
         if thread_idx is not None:
