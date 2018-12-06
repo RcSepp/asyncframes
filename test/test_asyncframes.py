@@ -25,7 +25,7 @@ NUM_ITERATIONS = 1
 # NUM_THREADS controls the number of worker threads to start when running an event loop
 # If 0, the number of CPU threads is used (according to os.sched_getaffinity(0))
 # If 1, no multithreading will be performed
-NUM_THREADS = 0
+NUM_THREADS = 4
 
 # If true, any exceptions during an iteration of a test case will print a full line-by-line trace of the executed test
 USE_TRACER = False
