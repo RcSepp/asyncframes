@@ -6,18 +6,21 @@ import os.path
 import setuptools
 import asyncframes
 
-def read(filename):
+def read(filename, begin_after=None):
     with open(os.path.join(os.path.dirname(__file__), filename)) as file:
-        return file.read()
+        content = file.read()
 
-ld = read('README.rst') + '\n\n' + read('CHANGES.rst')
+    if begin_after and begin_after in content:
+        content = content[content.find(begin_after) + len(begin_after):]
+
+    return content
 
 setuptools.setup(
     name='asyncframes',
     packages=['asyncframes'],
     version=asyncframes.__version__,
     description='Scalable parallel programming using frame hierarchies',
-    long_description=read('README.rst') + '\n\n' + read('CHANGES.rst'),
+    long_description=read('README.rst', "----\n\n") + '\n\n' + read('CHANGES.rst'),
     author='Sebastian Klaassen',
     author_email='rcsepp@hotmail.com',
     license='MIT',
