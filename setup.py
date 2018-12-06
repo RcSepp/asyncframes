@@ -19,7 +19,7 @@ setuptools.setup(
     name='asyncframes',
     packages=['asyncframes'],
     version=asyncframes.__version__,
-    description='Scalable parallel programming using frame hierarchies',
+    description='Parallel programming for software engineers',
     long_description=read('README.rst', "----\n\n") + '\n\n' + read('CHANGES.rst'),
     author='Sebastian Klaassen',
     author_email='rcsepp@hotmail.com',
