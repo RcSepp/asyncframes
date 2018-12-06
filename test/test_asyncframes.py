@@ -431,6 +431,8 @@ class TestAsyncFrames(unittest.TestCase):
             await sleep(seconds)
             test.log.debug('Removing frame')
             test.assertEqual(await frame.remove(), True)
+            test.log.debug('Re-removing frame')
+            test.assertEqual(await frame.remove(), False)
         @Frame
         async def main(self):
             self.p = None
@@ -459,8 +461,8 @@ class TestAsyncFrames(unittest.TestCase):
             test.log.debug('Re-removing primitive')
             test.assertEqual(self.p.remove(), False)
 
-            test.log.debug('Re-removing frame')
-            test.assertEqual(await self.remove(), False)
+            test.log.debug('Re-removing frame during frame.free event')
+            test.assertEqual(await self.remove(), True)
         test.run_frame(main, expected_log="""
             0.0: Removing primitive
             0.1: Re-removing any_
@@ -468,6 +470,7 @@ class TestAsyncFrames(unittest.TestCase):
             0.3: Re-removing all_
             0.3: Re-removing event source
             0.3: Re-removing primitive
+            0.3: Re-removing frame during frame.free event
             0.3: Re-removing frame
             0.3: done
         """)
@@ -846,14 +849,72 @@ class TestAsyncFrames(unittest.TestCase):
         async def frame():
             sf = subframe()
             await sf.ready
+            test.log.debug(await sf.remove()) # This will be canceled by subframe -> False
+            test.log.debug(await sf.remove()) # This will also be canceled by subframe -> False
+            test.log.debug(await sf.remove()) # This will remove subframe -> True
+            test.log.debug(await sf.remove()) # This will have no effect -> False
+        @Frame
+        async def subframe(self):
+            f = await self.free
+            f.cancel = True
+            f = await self.free
+            f.cancel = True
+            await self.free
+        test.run_frame(frame, expected_log="""
+            0.0: False
+            0.0: False
+            0.0: True
+            0.0: False
+            0.0: done
+        """)
+
+    def test_cancel_child_free(self):
+        test = self
+        @Frame
+        async def frame():
+            sf = subframe()
+            await sf.ready
+            test.log.debug(await sf.remove()) # This will be canceled by subframe_child -> False
+            test.log.debug(await sf.remove()) # This will also be canceled by subframe_child -> False
+            test.log.debug(await sf.remove()) # This will remove subframe and subframe_child -> True
+            test.log.debug(await sf.remove()) # This will have no effect -> False
+        @Frame
+        async def subframe(self):
+            @Frame
+            async def subframe_child(self):
+                f = await self.free
+                f.cancel = True
+                f = await self.free
+                f.cancel = True
+                await self.free
+            subframe_child()
+            await hold()
+        test.run_frame(frame, expected_log="""
+            0.0: False
+            0.0: False
+            0.0: True
+            0.0: False
+            0.0: done
+        """)
+
+    def test_cancel_child_free(self):
+        test = self
+        @Frame
+        async def frame():
+            sf = subframe()
+            await sf.ready
             test.log.debug(await sf.remove())
             test.log.debug(await sf.remove())
             test.log.debug(await sf.remove())
         @Frame
         async def subframe(self):
-            f = await self.free
-            f.cancel = True
-            await self.free
+            @Frame
+            async def subframe_child(self):
+                f = await self.free
+                f.cancel = True
+                await self.free
+            await subframe_child().ready
+            await hold()
         test.run_frame(frame, expected_log="""
             0.0: False
             0.0: True

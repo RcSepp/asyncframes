@@ -332,16 +332,13 @@ class Awaitable(collections.abc.Awaitable):
         self._eventloop_affinity = None
         self.exception_handler = None
 
-    def _remove(self, process_counter=None, blocking=False):
-        """Remove this awaitable from the frame hierarchy.
-
-        Returns:
-            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
-        """
-
+    def _remove(self, process_counter=None, blocking=False, ondone=lambda result: None):
         # Mark self as removed
         if self._removed:
-            return False
+            ondone(False)
+            if process_counter:
+                process_counter.sub(1)
+            return
         self._removed = True
 
         # Remove self from parent frame
@@ -353,10 +350,10 @@ class Awaitable(collections.abc.Awaitable):
             listeners = self._listeners
             self._listeners = set()
 
-            if process_counter is not None:
-                process_counter.add(len(listeners))
-
             if blocking:
+                if process_counter:
+                    process_counter.add(len(listeners))
+
                 for listener in listeners:
                     if listener._eventloop_affinity is None or listener._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
                         listener.process(self, self._result, process_counter, blocking)
@@ -364,10 +361,13 @@ class Awaitable(collections.abc.Awaitable):
                         listener._eventloop_affinity._invoke(0, listener.process, (self, self._result, process_counter, blocking))
             else:
                 for listener in listeners:
-                    _THREAD_LOCALS._current_eventloop._enqueue(0, listener.process, (self, self._result, process_counter, blocking), listener._eventloop_affinity)
+                    _THREAD_LOCALS._current_eventloop._enqueue(0, listener.process, (self, self._result), listener._eventloop_affinity)
 
         del self
-        return True
+        ondone(True)
+        if process_counter:
+            process_counter.sub(1)
+        return
 
     def remove(self):
         """Remove this awaitable from the frame hierarchy.
@@ -379,8 +379,9 @@ class Awaitable(collections.abc.Awaitable):
         remove_event = Event(str(self.__name__) + ".remove", singleshot=True)
         process_counter = _AtomicCounter(1, lambda result: AbstractEventLoop.sendevent(remove_event, result, None, True)) # Add process: Frame.remove
         process_counter.on_zero_args = (True,) # Default remove() result to True
-        process_counter.on_zero_args = (self._remove(process_counter, False),)
-        process_counter.sub(1) # Remove process: Frame.remove
+        def onremoved(result):
+            process_counter.on_zero_args = (result,)
+        self._remove(process_counter, False, onremoved)
         return remove_event
 
     @property
@@ -464,8 +465,8 @@ class Awaitable(collections.abc.Awaitable):
                     if not getattr(listener, 'ready', True):
                         AbstractEventLoop.sendevent(listener.ready, None, None, True)
 
-        if process_counter:
-            process_counter.sub(1)
+            if process_counter:
+                process_counter.sub(1)
 
     def __and__(self, other):
         """Register A & B as shortcut for ``all_(A, B)``.
@@ -508,27 +509,19 @@ class Event(Awaitable):
         self.singleshot = singleshot
         self.eventloop = _THREAD_LOCALS._current_eventloop # Store creating eventloop, as a fallback in case self.post() is called from a thread without an eventloop
 
-    def _remove(self, process_counter=None, blocking=False):
-        """Remove this awaitable from the frame hierarchy.
-
-        If `singleshot` is False, this function is supressed
-
-        Returns:
-            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
-        """
-        
+    def _remove(self, process_counter=None, blocking=False, ondone=lambda result: None):
         if self.singleshot:
-            return super()._remove(process_counter, blocking)
+            super()._remove(process_counter, blocking, ondone)
         else:
             # Wake up listeners
             if self._listeners:
                 listeners = self._listeners
                 self._listeners = set()
 
-                if process_counter is not None:
-                    process_counter.add(len(listeners))
-
                 if blocking:
+                    if process_counter is not None:
+                        process_counter.add(len(listeners))
+
                     for listener in listeners:
                         if listener._eventloop_affinity is None or listener._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
                             listener.process(self, self._result, process_counter, blocking)
@@ -536,7 +529,10 @@ class Event(Awaitable):
                             listener._eventloop_affinity._invoke(0, listener.process, (self, self._result, process_counter, blocking))
                 else:
                     for listener in listeners:
-                        _THREAD_LOCALS._current_eventloop._enqueue(0, listener.process, (self, self._result, process_counter, blocking), listener._eventloop_affinity)
+                        _THREAD_LOCALS._current_eventloop._enqueue(0, listener.process, (self, self._result), listener._eventloop_affinity)
+            ondone(False)
+            if process_counter:
+                process_counter.sub(1)
 
     def __bool__(self):
         return self._removed
@@ -626,29 +622,30 @@ class all_(Awaitable):
             stop.value = self._result
             raise stop
 
-    def _remove(self, process_counter=None, blocking=False):
-        """Remove this awaitable from the frame hierarchy.
-
-        Returns:
-            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
-        """
-
+    def _remove(self, process_counter=None, blocking=False, ondone=lambda result: None):
         if self.removed:
-            return False
+            ondone(False)
+            if process_counter:
+                process_counter.sub(1)
+            return
 
         with self._remove_lock:
             if self.removed: # If this frame was closed while acquiring the lock, ...
-                return False
+                ondone(False)
+                if process_counter:
+                    process_counter.sub(1)
+                return
 
             for awaitable in self._awaitables:
                 awaitable._listeners.discard(self)
             self._awaitables.clear()
 
             # Remove awaitable
-            super()._remove(process_counter, blocking)
-
-            return True
-        return False
+            super()._remove(process_counter, blocking, ondone)
+            return
+        if process_counter:
+            process_counter.sub(1)
+        ondone(False)
 
 class any_(Awaitable):
     """An awaitable that blocks the awaiting frame until any of the passed awaitables wakes up.
@@ -691,29 +688,30 @@ class any_(Awaitable):
         stop.value = (sender, msg)
         raise stop
 
-    def _remove(self, process_counter=None, blocking=False):
-        """Remove this awaitable from the frame hierarchy.
-
-        Returns:
-            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before.
-        """
-
+    def _remove(self, process_counter=None, blocking=False, ondone=lambda result: None):
         if self.removed:
-            return False
+            ondone(False)
+            if process_counter:
+                process_counter.sub(1)
+            return
 
         with self._remove_lock:
             if self.removed: # If this frame was closed while acquiring the lock, ...
-                return False
+                ondone(False)
+                if process_counter:
+                    process_counter.sub(1)
+                return
 
             for awaitable in self._awaitables:
                 awaitable._listeners.discard(self)
             self._awaitables.clear()
 
             # Remove awaitable
-            super()._remove(process_counter, blocking)
-
-            return True
-        return False
+            super()._remove(process_counter, blocking, ondone)
+            return
+        if process_counter:
+            process_counter.sub(1)
+        ondone(False)
 
 
 class sleep(Event):
@@ -886,6 +884,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
         self._primitives = []
         self._generator = None
         self._generator_eventloop = None
+        self._freeing = False
         self.ready = Event(str(self.__name__) + ".ready", True)
         self.ready.ready = self.ready # Set ready state of ready event to itself. This way the ready event will propagate through `await frame.ready`
         self.free = Event(str(self.__name__) + ".free", False)
@@ -968,34 +967,57 @@ class Frame(Awaitable, metaclass=FrameMeta):
                 if getattr(awaitable, 'ready', True) and not self.ready: # If awaitable is ready or awaitable doesn't have a ready event
                     AbstractEventLoop.sendevent(self.ready, None, None, True)
 
-    def _remove(self, process_counter=None, blocking=False):
-        """Remove this awaitable from the frame hierarchy.
+    def _mark_freeing(self, value):
+        self._freeing = value
+        for child in self._children:
+            if isinstance(child, Frame):
+                child._mark_freeing(value)
 
-        Returns:
-            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
-        """
+    def _send_free_event(self, free_args, process_counter):
+        process_counter.add(len(self._children))
 
-        if self.removed:
-            return False
+        # Send child frame free events
+        for child in self._children:
+            if isinstance(child, Frame):
+                child._send_free_event(free_args, process_counter)
+            else:
+                process_counter.sub(1)
 
-        if process_counter:
-            process_counter.add(1) # Add process: Frame._remove_stage2
+        # Send current frame free event
+        AbstractEventLoop.sendevent(self.free, free_args, process_counter, True)
 
-        # Send frame free event
-        free_args = FreeEventArgs()
-        free_process_counter = _AtomicCounter(1, self._remove_stage2)
-        free_process_counter.on_zero_args = (free_args, process_counter, blocking)
-        AbstractEventLoop.sendevent(self.free, free_args, free_process_counter, True)
-        return not free_args.cancel
+    def _remove(self, process_counter=None, blocking=False, ondone=lambda result: None):
+        if self._freeing: # If this frame's free event is being processed, ...
+            self._remove_stage2(process_counter, blocking, ondone) # Remove the frame
+        else: # If this frame's free event wasn't send yet, ...
+            self._mark_freeing(True) # Mark this frame and all children for removal
 
-    def _remove_stage2(self, free_args, process_counter=None, blocking=False):
-        if free_args.cancel or self.removed or not self._remove_lock.acquire(blocking=False): # If free was canceled, this frame was closed in response to the free event or removal is already in progress, ...
+            free_args = FreeEventArgs()
+            def after_free():
+                if free_args.cancel: # If the free event was canceled, ...
+                    self._mark_freeing(False) # Unmark this frame and all children from removal
+                    ondone(False) # Awake awaiting frames with value 'False'
+                    if process_counter:
+                        process_counter.sub(1)
+                elif self._removed: # If this frame was removed as a result of the free event, ...
+                    ondone(True) # Awake awaiting frames with value 'True'
+                    if process_counter:
+                        process_counter.sub(1)
+                else: # If the free event wasn't canceled and didn't remove this frame, ...
+                    self._remove_stage2(process_counter, blocking, ondone) # Remove this frame
+            self._send_free_event(free_args, _AtomicCounter(1, after_free))
+
+    def _remove_stage2(self, process_counter=None, blocking=False, ondone=lambda result: None):
+        if self.removed or not self._remove_lock.acquire(blocking=False): # If this frame was closed in response to the free event or removal is already in progress, ...
+            ondone(False)
             if process_counter:
                 process_counter.sub(1) # Remove process: Frame._remove_stage2
         else:
             try:
                 # Remove child frames
                 genexit = None
+                if process_counter:
+                    process_counter.add(len(self._children))
                 while self._children:
                     try:
                         self._children[-1]._remove(process_counter, blocking)
@@ -1025,12 +1047,9 @@ class Frame(Awaitable, metaclass=FrameMeta):
                         self._generator = None
 
                 # Remove awaitable
-                super()._remove(process_counter, blocking)
+                super()._remove(process_counter, blocking, ondone)
             finally:
                 self._remove_lock.release()
-
-                if process_counter:
-                    process_counter.sub(1) # Remove process: Frame._remove_stage2
 
                 # Raise delayed GeneratorExit exception
                 if genexit:
