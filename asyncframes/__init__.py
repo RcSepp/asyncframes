@@ -409,7 +409,7 @@ class Awaitable(collections.abc.Awaitable):
             return self._result
 
     @abc.abstractmethod
-    def step(self, sender, msg):
+    def _step(self, sender, msg):
         raise NotImplementedError # pragma: no cover
 
     def process(self, sender, msg, process_counter=None, blocking=False):
@@ -422,7 +422,7 @@ class Awaitable(collections.abc.Awaitable):
 
         _THREAD_LOCALS._current_frame = self # Activate self
         try:
-            self.step(sender, msg)
+            self._step(sender, msg)
         except BaseException as err:
             if getattr(self, 'ready', True): # If self is ready or self doesn't have a ready event
                 # Send ready event to all listeners that have a ready event, but aren't ready yet
@@ -537,7 +537,7 @@ class Event(Awaitable):
     def __bool__(self):
         return self._removed
 
-    def step(self, sender, msg):
+    def _step(self, sender, msg):
         """Handle incoming events.
 
         Args:
@@ -602,7 +602,7 @@ class all_(Awaitable):
         if self._parent:
             self._parent._children.append(self)
 
-    def step(self, sender, msg):
+    def _step(self, sender, msg):
         """Respond to an awaking child.
 
         Args:
@@ -672,7 +672,7 @@ class any_(Awaitable):
         if self._parent:
             self._parent._children.append(self)
 
-    def step(self, sender, msg):
+    def _step(self, sender, msg):
         """Respond to an awaking child.
 
         Args:
@@ -739,7 +739,7 @@ class hold(Event):
 
     def __init__(self):
         super().__init__("hold()", singleshot=True)
-    def step(self, sender, msg):
+    def _step(self, sender, msg):
         """ Ignore any incoming events."""
 
         pass
@@ -768,7 +768,7 @@ class animate(Event):
         else:
             self.post(None, interval)
 
-    def step(self, sender, msg):
+    def _step(self, sender, msg):
         """Resend the animation event until the timeout is reached."""
         t = (datetime.datetime.now() - self.startTime).total_seconds()
 
@@ -918,7 +918,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
                 elif self.startup_behaviour == FrameStartupBehaviour.immediate:
                     # Start coroutine
                     try:
-                        self.step(None, None)
+                        self._step(None, None)
                     except (StopIteration, GeneratorExit):
                         pass
                     finally:
@@ -930,7 +930,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
             # Activate parent
             _THREAD_LOCALS._current_frame = self._parent
 
-    def step(self, sender, msg):
+    def _step(self, sender, msg):
         """Resume the frame coroutine.
 
         Args:
