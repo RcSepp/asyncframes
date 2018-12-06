@@ -1065,6 +1065,26 @@ class Frame(Awaitable, metaclass=FrameMeta):
             genevtlp._invoke(0, self._remove_stage3, (process_counter,))
 
 class PFrame(Frame):
+    """A parallel :class:`Frame` that can run on any thread.
+
+    Multithreading can be enabled for any frame by changing its base class to
+    :class:`PFrame`.
+
+    The only difference between :class:`Frame` and :class:`PFrame` is that
+    instances of :class:`PFrame` are not restricted to run on the same thread as
+    their parent frame.
+
+    Args:
+        startup_behaviour (FrameStartupBehaviour, optional): Defaults to FrameStartupBehaviour.delayed.
+            Controls whether the frame is started immediately or queued on the eventloop.
+        thread_idx (int, optional): Defaults to None. If set, forces the scheduler to affiliate this frame with the given thread.
+
+    Raises:
+        ValueError: If `thread_idx` is outside the range of allocated threads.
+
+            The number of allocated threads is controlled by the `num_threads` parameter of :meth:`AbstractEventLoop.run`.
+    """
+
     def __init__(self, startup_behaviour=FrameStartupBehaviour.delayed, thread_idx=None):
         super().__init__(startup_behaviour, thread_idx)
         if thread_idx is None:
