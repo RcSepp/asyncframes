@@ -19,6 +19,9 @@
 			"type": "python",
 			"request": "launch",
 			"cwd": "${workspaceFolder}/test",
+			"env": {
+				"PYTHONPATH": "${workspaceFolder}/test"
+			},
 			"module": "unittest",
 			"args": [
 				"test_asyncframes.TestAsyncFrames"

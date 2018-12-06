@@ -4,16 +4,16 @@
 
 import threading
 import time
-from asyncframes import Frame, EventSource, sleep
+from asyncframes import Frame, Event, sleep
 from asyncframes.pyqt5_eventloop import EventLoop
 
 class Thread(threading.Thread):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.event = EventSource('Thread.event')
+        self.event = Event('Thread.event')
     def run(self):
         time.sleep(1)
-        self.event.invoke(self)
+        self.event.post()
 
 @Frame
 async def print_dots():

@@ -7,9 +7,15 @@ import asyncframes
 
 
 class EventLoop(asyncframes.AbstractEventLoop):
+    """An implementation of AbstractEventLoop based on asyncio."""
+
     def __init__(self):
         super().__init__()
-        self.loop = asyncio.get_event_loop()
+        try:
+            self.loop = asyncio.get_event_loop() # Use existing eventloop
+        except RuntimeError: # If no eventloop exists on this thread, ...
+            self.loop = asyncio.new_event_loop() # Create a new eventloop
+            asyncio.set_event_loop(self.loop) # Make the new eventloop current
 
     def _run(self):
         self.loop.run_forever()
@@ -17,14 +23,25 @@ class EventLoop(asyncframes.AbstractEventLoop):
     def _stop(self):
         self.loop.stop()
 
-    def _post(self, event, delay):
-        if delay <= 0:
-            self.loop.call_soon(self.sendevent, event)
-        else:
-            self.loop.call_later(delay, self.sendevent, event)
+    def _close(self):
+        self.loop.close()
 
-    def _invoke(self, event, delay):
-        if delay <= 0:
-            self.loop.call_soon_threadsafe(self.sendevent, event)
-        else:
-            self.loop.call_soon_threadsafe(self.loop.call_later, delay, self.sendevent, event)
+    def _clear(self):
+        # Re-open asyncio eventloop to discard any pending events
+        self.loop.close() # Close current event loop
+        self.loop = asyncio.new_event_loop() # Create a new eventloop
+        asyncio.set_event_loop(self.loop) # Make the new eventloop current
+
+    def _post(self, delay, callback, args):
+        if not self.loop.is_closed():
+            if delay <= 0:
+                self.loop.call_soon(callback, *args)
+            else:
+                self.loop.call_later(delay, callback, *args)
+
+    def _invoke(self, delay, callback, args):
+        if not self.loop.is_closed():
+            if delay <= 0:
+                self.loop.call_soon_threadsafe(callback, *args)
+            else:
+                self.loop.call_soon_threadsafe(self.loop.call_later, delay, callback, *args)
