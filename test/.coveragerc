@@ -1,5 +1,6 @@
 [run]
 source = ../asyncframes
+concurrency = thread
 
 [report]
 exclude_lines =
