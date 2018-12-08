@@ -887,35 +887,10 @@ class TestAsyncFrames(unittest.TestCase):
                 f = await self.free
                 f.cancel = True
                 await self.free
-            subframe_child()
-            await hold()
-        test.run_frame(frame, expected_log="""
-            0.0: False
-            0.0: False
-            0.0: True
-            0.0: False
-            0.0: done
-        """)
-
-    def test_cancel_child_free(self):
-        test = self
-        @Frame
-        async def frame():
-            sf = subframe()
-            await sf.ready
-            test.log.debug(await sf.remove())
-            test.log.debug(await sf.remove())
-            test.log.debug(await sf.remove())
-        @Frame
-        async def subframe(self):
-            @Frame
-            async def subframe_child(self):
-                f = await self.free
-                f.cancel = True
-                await self.free
             await subframe_child().ready
             await hold()
         test.run_frame(frame, expected_log="""
+            0.0: False
             0.0: False
             0.0: True
             0.0: False
