@@ -3,7 +3,9 @@
 
 .. toctree::
     :caption: Contents
+    :maxdepth: 2
 
+    parallel_programming_model
     API
 
 
