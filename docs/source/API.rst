@@ -17,6 +17,14 @@ asyncframes\.asyncio\_eventloop module
     :undoc-members:
     :show-inheritance:
 
+asyncframes\.glib\_eventloop module
+------------------------------------
+
+.. automodule:: asyncframes.glib_eventloop
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 asyncframes\.pyqt5\_eventloop module
 ------------------------------------
 

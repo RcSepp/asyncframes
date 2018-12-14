@@ -1223,5 +1223,23 @@ class TestPyQt5EventLoop(TestAsyncFrames):
         if not errors.empty():
             raise Exception(str(errors.qsize()) + " test cases failed") from errors.get()
 
+class TestGLibEventLoop(TestAsyncFrames):
+    def setUp(self):
+        # Create GLib event loop
+        try:
+            from asyncframes.glib_eventloop import EventLoop
+        except ImportError:
+            # Announce that we skip this test case, if not announced before
+            global SKIP_TEST_CASE
+            if self.__class__ != SKIP_TEST_CASE:
+                print()
+                print("Unable to import asyncframes.glib_eventloop. Skipping unit tests for this event loop.")
+                SKIP_TEST_CASE = self.__class__
+
+            raise unittest.SkipTest
+        else:
+            self.loop = EventLoop()
+            super().setUp()
+
 if __name__ == "__main__":
     unittest.main()
