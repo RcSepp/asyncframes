@@ -4,7 +4,7 @@ sudo: true
 python:
 # - "3.5"
 # - "3.6"
-  - "3.7_with_system_site_packages"
+  - "3.7"
 before_install:
   - sudo apt-get install --no-install-recommends -y xvfb gir1.2-gtk-3.0 python3-gi python3-gi-cairo python3-pep8 pyflakes python3-pytest
 install:
