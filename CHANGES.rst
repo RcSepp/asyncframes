@@ -1,6 +1,11 @@
 Changelog
 =========
 
+2.1.0 (2019-01-07)
+------------------
+
+- GTK support - Create GTK widgets using the GLib eventloop.
+
 2.0.0 (2018-12-06)
 ------------------
 
