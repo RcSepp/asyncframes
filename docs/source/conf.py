@@ -25,7 +25,7 @@ copyright = u'2018, Sebastian Klaassen'
 author = u'Sebastian Klaassen'
 
 # The short X.Y version
-version = asyncframes.__version__
+version = '.'.join(asyncframes.__version__.split('.')[:2])
 # The full version, including alpha/beta/rc tags
 release = asyncframes.__version__
 
@@ -71,6 +71,12 @@ exclude_patterns = []
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'sphinx'
+
+# A string of reStructuredText that will be included at the end of every source
+# file that is read.
+rst_epilog = """
+.. |version| replace:: v{version}
+""".format(version=version)
 
 
 # -- Options for HTML output -------------------------------------------------

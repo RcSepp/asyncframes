@@ -887,35 +887,10 @@ class TestAsyncFrames(unittest.TestCase):
                 f = await self.free
                 f.cancel = True
                 await self.free
-            subframe_child()
-            await hold()
-        test.run_frame(frame, expected_log="""
-            0.0: False
-            0.0: False
-            0.0: True
-            0.0: False
-            0.0: done
-        """)
-
-    def test_cancel_child_free(self):
-        test = self
-        @Frame
-        async def frame():
-            sf = subframe()
-            await sf.ready
-            test.log.debug(await sf.remove())
-            test.log.debug(await sf.remove())
-            test.log.debug(await sf.remove())
-        @Frame
-        async def subframe(self):
-            @Frame
-            async def subframe_child(self):
-                f = await self.free
-                f.cancel = True
-                await self.free
             await subframe_child().ready
             await hold()
         test.run_frame(frame, expected_log="""
+            0.0: False
             0.0: False
             0.0: True
             0.0: False
@@ -1247,6 +1222,24 @@ class TestPyQt5EventLoop(TestAsyncFrames):
 
         if not errors.empty():
             raise Exception(str(errors.qsize()) + " test cases failed") from errors.get()
+
+class TestGLibEventLoop(TestAsyncFrames):
+    def setUp(self):
+        # Create GLib event loop
+        try:
+            from asyncframes.glib_eventloop import EventLoop
+        except ImportError:
+            # Announce that we skip this test case, if not announced before
+            global SKIP_TEST_CASE
+            if self.__class__ != SKIP_TEST_CASE:
+                print()
+                print("Unable to import asyncframes.glib_eventloop. Skipping unit tests for this event loop.")
+                SKIP_TEST_CASE = self.__class__
+
+            raise unittest.SkipTest
+        else:
+            self.loop = EventLoop()
+            super().setUp()
 
 if __name__ == "__main__":
     unittest.main()

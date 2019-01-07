@@ -34,10 +34,10 @@ async def count_using_pframes(printfunc):
 
 if __name__ == "__main__":
     loop = EventLoop()
-    
+
     alphabetical = lambda i: "abc"[i]
     thread_numbers = lambda i: asyncframes.get_current_eventloop_index()
-    
+
     print("Run 3 blocking threads in parallel using Frames:")
     loop.run(count_using_frames, printfunc=alphabetical)
     loop.run(count_using_frames, printfunc=thread_numbers)
