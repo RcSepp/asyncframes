@@ -41,7 +41,7 @@ The following table summarizes the three types of parallelism of the previous se
 +--------------------------+------------------+--------------+------------+-----------+-------------+
 
 .. [1] *PFrames* require asyncframes v2.0 or above.
-.. [2] *DFrames* aren't implemented in asyncframes |version|. This feature is under active development and will be added in a future release.
+.. [2] *DFrames* aren't implemented in asyncframes |version|. This feature is under development and will be added in a future release.
 
 In the Frame Hierarchy Programming Model, parallelism is implemented according to the "concurrency by default" paradigm. By default every frame is maximally parallel (*DFrame*), but the programmer can reduce the degree of parallelism by employing restrictions. *PFrames* are like *DFrames*, but with the restriction of running on the same *process* as their parent frame. *Frames* are like *PFrames*, but with the restriction of running on the same *thread* as their parent frame.
 
@@ -64,8 +64,8 @@ How to disable multithreading entirely
 
 When ``EventLoop.run()`` is called, asyncframes allocates multiple threads. The number of allocated threads can be controlled with the ``num_threads`` parameter. By default asyncframes will allocate as many threads as there are available hardware threads on the CPU. To run a program entirely singlethreaded, set the ``num_threads`` parameter to 1. In this scenario, asyncframes will never run any other threads, even if *PFrames* or *DFrames* are used. This is because in the restriction model *PFrames* are free to run on any available thread, but there is only on thread available.
 
-Examples
---------
+Example
+-------
 
 To illustrate the differences between *Frames* and *PFrames*, let's run multiple counters in parallel using blocking operations.
 
