@@ -46,16 +46,22 @@ class InvalidOperationException(Exception):
         super().__init__(msg)
 
 class FreeEventArgs(object):
+    """Event arguments returned by the :attr:`Frame.free` event.
+
+    Attributes:
+        cancel (bool): Setting this to True, cancels the event.
+    """
+
     def __init__(self):
         self.cancel = False
 
 class _AtomicCounter(object):
     """A thread-safe counter that calls a function whenever it hits zero.
 
-        Args:
-            initial_value (int): The initial counter value.
-            on_zero (Callable): The function to call whenever the counter hits zero.
-        """
+    Args:
+        initial_value (int): The initial counter value.
+        on_zero (Callable): The function to call whenever the counter hits zero.
+    """
 
     def __init__(self, initial_value, on_zero):
         self._lock = threading.Lock()
@@ -373,7 +379,10 @@ class Awaitable(collections.abc.Awaitable):
         """Remove this awaitable from the frame hierarchy.
 
         Returns:
-            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
+            Event: An awaitable event.
+            
+            The remove event returns True once the awaitable has been removed or False if
+            the request was either canceled, or the awaitable had already been removed before.
         """
 
         remove_event = Event(str(self.__name__) + ".remove", singleshot=True)
@@ -413,11 +422,16 @@ class Awaitable(collections.abc.Awaitable):
         raise NotImplementedError # pragma: no cover
 
     def process(self, sender, msg, process_counter=None, blocking=False):
-        """Propagate an event from its source and along awaiting nodes through the frame hierarchy.
+        """Handle an incomming event from the eventloop.
+
+        .. deprecated:: 2.1
+            This method will be made private in a future release of asyncframes.
 
         Args:
-            sender (Awaitable): The source of the event or an awaited node that woke up.
-            msg: The incomming event or propagated message.
+            sender (Awaitable): The source of the event.
+            msg: The incomming event.
+            process_counter (_AtomicCounter, optional): Defaults to None. A thread-safe counter that determins when an event has been fully processed.
+            blocking (bool, optional): Defaults to False. If True, doesn't return until the event was fully processed.
         """
 
         _THREAD_LOCALS._current_frame = self # Activate self
@@ -501,7 +515,7 @@ class Event(Awaitable):
 
     Args:
         name (str): The name of the event.
-        singleshot (bool, optional): Defaults to False. If `True`, removes the event after it has been woken.
+        singleshot (bool, optional): Defaults to False. If True, removes the event after it has been woken.
     """
 
     def __init__(self, name, singleshot=False):
@@ -826,6 +840,10 @@ class Frame(Awaitable, metaclass=FrameMeta):
             Controls whether the frame is started immediately or queued on the eventloop.
         thread_idx (int, optional): Defaults to None. If set, forces the scheduler to affiliate this frame with the given thread.
 
+    Attributes:
+        free (Event): An event that fires just before the frame is removed.
+        ready (Event): An event that fires the first time the frame is suspended (using ``await``) or goes out of scope.
+
     Raises:
         ValueError: If `thread_idx` is outside the range of allocated threads.
 
@@ -1124,7 +1142,7 @@ class Primitive(object):
         """Remove this primitive from its owner.
 
         Returns:
-            bool: If `True`, this event was removed. If `False` the request was either canceled, or the event had already been removed before
+            bool: If True, this event was removed. If False the request was either canceled, or the event had already been removed before
         """
 
         if self._removed:
@@ -1135,9 +1153,26 @@ class Primitive(object):
 
 
 def get_current_eventloop_index():
+    """Get the thread index of the currently active event loop.
+
+    Returns:
+        int: The thread index of the current event loop or None if no event loop is currently active.
+    """
+
     return _THREAD_LOCALS._current_eventloop.eventloops.index(_THREAD_LOCALS._current_eventloop) if getattr(_THREAD_LOCALS, '_current_eventloop', None) and hasattr(_THREAD_LOCALS._current_eventloop, 'eventloops') else None
 
 def find_parent(parenttype):
+    """Find parent frame of given type.
+
+    Recursively search the frame hierarchy for the closest ancestor of the given type.
+
+    Args:
+        parenttype (type): The frame class type to search for.
+
+    Returns:
+        Frame: The closest ancestor of type ``parenttype`` or None if none was found.
+    """
+
     parent = _THREAD_LOCALS._current_frame
     while parent and not issubclass(type(parent), parenttype):
         parent = parent._parent
