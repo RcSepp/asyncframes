@@ -9,7 +9,7 @@ before_install:
   - sudo apt-get install -y libgirepository1.0-dev
 install:
   - pip install pyqt5
-  - pip install cairo
+  - pip install pycairo
   - pip install pygobject
   - pip install .
   - pip install coverage
