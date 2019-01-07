@@ -8,6 +8,7 @@ asyncframes module
     :members:
     :undoc-members:
     :show-inheritance:
+    :exclude-members: process
 
 asyncframes\.asyncio\_eventloop module
 --------------------------------------
