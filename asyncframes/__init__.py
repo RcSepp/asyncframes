@@ -22,7 +22,7 @@ __all__ = [
     'get_current_eventloop_index', 'InvalidOperationException', 'hold',
     'PFrame', 'Primitive', 'sleep'
 ]
-__version__ = '2.1.0'
+__version__ = '2.1.1'
 
 
 class ThreadLocals(threading.local):
@@ -198,8 +198,25 @@ class AbstractEventLoop(metaclass=abc.ABCMeta):
         self._exception = None
 
     def run(self, frame, *frameargs, num_threads=0, **framekwargs):
-        if num_threads <= 0:
-            num_threads = len(os.sched_getaffinity(0))
+        if num_threads <= 0:  # If no specific number of threads was requested, ...
+            # Default num_threads to the number of available CPU cores
+            try:
+                # Try to get the number of available CPU cores this process is restricted to
+                num_threads = len(os.sched_getaffinity(0))
+            except:
+                num_threads = 0
+
+            if num_threads <= 0: # If the number of CPU cores couldn't be determined, ...
+                try:
+                    # Try to get the number of available CPU cores
+                    import multiprocessing
+                    num_threads = multiprocessing.cpu_count()
+                except:
+                    num_threads = 0
+
+                if num_threads <= 0: # If the number of CPU cores still couldn't be determined, ...
+                    num_threads = 4 # Fall back to 4 threads
+
         if _THREAD_LOCALS._current_eventloop is not None:
             raise InvalidOperationException("Another event loop is already running")
         _THREAD_LOCALS._current_eventloop = self
