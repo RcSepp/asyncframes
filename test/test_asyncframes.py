@@ -1199,6 +1199,7 @@ class TestAsyncFrames(unittest.TestCase):
             0.0: done
         """)
 
+    @unittest.skip("Parallel testing tends to fail randomly due to unstable timing")
     def test_thread_independence(self):
         test = self
         errors = queue.Queue()
@@ -1246,6 +1247,7 @@ class TestPyQt5EventLoop(TestAsyncFrames):
             self.loop = EventLoop(gui_enabled=False)
             super().setUp()
 
+    @unittest.skip("Parallel testing tends to fail randomly due to unstable timing")
     def test_thread_independence(self):
         test = self
         errors = queue.Queue()
