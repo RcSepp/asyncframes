@@ -352,6 +352,8 @@ class Awaitable(collections.abc.Awaitable):
         self._removed = False
         self._result = None
         self._listeners = set()
+        self._current_inline_frame = self
+        self._is_inline_frame = False
         self._eventloop_affinity = None
         self.exception_handler = None
 
@@ -451,7 +453,7 @@ class Awaitable(collections.abc.Awaitable):
             blocking (bool, optional): Defaults to False. If True, doesn't return until the event was fully processed.
         """
 
-        _THREAD_LOCALS._current_frame = self # Activate self
+        _THREAD_LOCALS._current_frame = self._current_inline_frame # Activate self
         try:
             self._step(sender, msg)
         except BaseException as err:
@@ -827,6 +829,12 @@ class FrameMeta(abc.ABCMeta):
         frameclass.Factory.frameclass = frameclass
         return frameclass
 
+    def __enter__(self):
+        return self().__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self().__exit__(exc_type, exc_val, exc_tb)
+
 class Frame(Awaitable, metaclass=FrameMeta):
     """An object within the frame hierarchy.
 
@@ -891,6 +899,10 @@ class Frame(Awaitable, metaclass=FrameMeta):
                 Frame: The newly created frame instance.
             """
 
+            if self.framefunc is None:
+                self.framefunc = frameargs[0]
+                return self
+
             if _THREAD_LOCALS._current_eventloop is None:
                 raise InvalidOperationException("Can't call frame without a running event loop")
             frame = super(Frame, self.__class__.frameclass).__new__(self.__class__.frameclass)
@@ -898,13 +910,40 @@ class Frame(Awaitable, metaclass=FrameMeta):
             frame.create(self.framefunc, *frameargs, **framekwargs)
             return frame
 
+        def __enter__(self):
+            if self.framefunc is None:
+                # Instantiate frame class with empty framefunc
+                self.framefunc = lambda: None
+                self.framefunc.__name__ = self.frameclass.__name__
+                with_frame = self()
+                self.framefunc = None
+            else:
+                # Instantiate frame class with self.framefunc
+                with_frame = self()
+            with_frame._is_inline_frame = True
+
+            # Activate frame instance
+            non_with_frame_parent = _THREAD_LOCALS._current_frame
+            while non_with_frame_parent._is_inline_frame:
+                non_with_frame_parent = non_with_frame_parent._parent
+            non_with_frame_parent._current_inline_frame = with_frame._current_inline_frame
+            _THREAD_LOCALS._current_frame = with_frame._current_inline_frame
+
+            return with_frame
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            # Activate parent
+            non_with_frame_parent = _THREAD_LOCALS._current_frame
+            while non_with_frame_parent._is_inline_frame:
+                non_with_frame_parent = non_with_frame_parent._parent
+            non_with_frame_parent._current_inline_frame = _THREAD_LOCALS._current_frame._parent
+            _THREAD_LOCALS._current_frame = _THREAD_LOCALS._current_frame._parent
+
     def __new__(cls, *frameclassargs, **frameclasskwargs):
         if len(frameclassargs) == 1 and not frameclasskwargs and callable(frameclassargs[0]): # If @frame was called without parameters
-            framefunc = frameclassargs[0]
-            frameclassargs = ()
-            return cls.Factory(framefunc, frameclassargs, frameclasskwargs)
+            return cls.Factory(frameclassargs[0], (), {})
         else: # If @frame was called with parameters
-            return lambda framefunc: cls.Factory(framefunc, frameclassargs, frameclasskwargs)
+            return cls.Factory(None, frameclassargs, frameclasskwargs)
 
     def __init__(self, startup_behaviour=FrameStartupBehaviour.delayed, thread_idx=None):
         if thread_idx is not None and (thread_idx < 0 or thread_idx >= len(_THREAD_LOCALS._current_eventloop.eventloops)):
@@ -941,7 +980,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
             self.free.__name__ = str(self.__name__) + ".free"
 
             # Activate self
-            _THREAD_LOCALS._current_frame = self
+            _THREAD_LOCALS._current_frame = self._current_inline_frame
 
             hasself = 'self' in inspect.signature(framefunc).parameters
             self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
@@ -958,14 +997,14 @@ class Frame(Awaitable, metaclass=FrameMeta):
                         pass
                     finally:
                         # Activate parent
-                        _THREAD_LOCALS._current_frame = self._parent
+                        _THREAD_LOCALS._current_frame = self._current_inline_frame._parent
                 else:
                     raise ValueError('startup_behaviour must be FrameStartupBehaviour.delayed or FrameStartupBehaviour.immediate')
             else: # If framefunc is a regular function
                 AbstractEventLoop.sendevent(self.ready, None, None, True) # Send ready event
 
             # Activate parent
-            _THREAD_LOCALS._current_frame = self._parent
+            _THREAD_LOCALS._current_frame = self._current_inline_frame._parent
 
     def _step(self, sender, msg):
         """Resume the frame coroutine.

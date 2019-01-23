@@ -1147,6 +1147,58 @@ class TestAsyncFrames(unittest.TestCase):
             0.1: done
         """)
 
+    def test_inline_frame(self):
+        test = self
+        @Frame
+        async def main(self):
+            # Inlining a frame class without arguments
+            with MyFrame as f1:
+                test.assertEqual(Primitive(Frame)._owner, f1)
+                with MyFrame as f2:
+                    test.assertEqual(Primitive(Frame)._owner, f2)
+                    await sleep(0)
+                    test.assertEqual(Primitive(Frame)._owner, f2)
+                test.assertEqual(Primitive(Frame)._owner, f1)
+            test.assertEqual(Primitive(Frame)._owner, self)
+
+            # Inlining a frame class with arguments
+            with MyFrame() as f1:
+                test.assertEqual(Primitive(Frame)._owner, f1)
+                with MyFrame() as f2:
+                    test.assertEqual(Primitive(Frame)._owner, f2)
+                    await sleep(0)
+                    test.assertEqual(Primitive(Frame)._owner, f2)
+                test.assertEqual(Primitive(Frame)._owner, f1)
+            test.assertEqual(Primitive(Frame)._owner, self)
+
+            # Inlining an existing frame
+            @MyFrame
+            def subframe():
+                test.log.debug('1')
+            with subframe as f1:
+                test.log.debug('2')
+                test.assertEqual(Primitive(Frame)._owner, f1)
+                with MyFrame as f2:
+                    test.assertEqual(Primitive(Frame)._owner, f2)
+                    await sleep(0)
+                    test.assertEqual(Primitive(Frame)._owner, f2)
+                test.assertEqual(Primitive(Frame)._owner, f1)
+
+            # Using inlining to inject an exception handler
+            #TODO: When using PFrame's, there is no guarantee that the handler gets injected before the frame is started
+            @MyFrame
+            async def subframe2():
+                raise MyException
+            with subframe2 as s2:
+                s2.exception_handler = lambda frame, err: test.log.debug("Frame exception caught: %s", repr(err))
+            await s2
+        test.run_frame(main, expected_log="""
+            0.0: 1
+            0.0: 2
+            0.0: Frame exception caught: MyException()
+            0.0: done
+        """)
+
     def test_thread_independence(self):
         test = self
         errors = queue.Queue()
