@@ -18,9 +18,9 @@ import warnings
 
 __all__ = [
     'all_', 'animate', 'any_', 'Awaitable', 'AbstractEventLoop', 'Event',
-    'find_parent', 'Frame', 'FrameStartupBehaviour', 'FreeEventArgs',
-    'get_current_eventloop_index', 'InvalidOperationException', 'hold',
-    'PFrame', 'Primitive', 'sleep'
+    'find_parent', 'Frame', 'FrameMeta', 'FrameStartupBehaviour',
+    'FreeEventArgs', 'get_current_eventloop_index', 'InvalidOperationException',
+    'hold', 'PFrame', 'Primitive', 'sleep'
 ]
 __version__ = '2.1.1'
 
