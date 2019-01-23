@@ -961,6 +961,8 @@ class Frame(Awaitable, metaclass=FrameMeta):
                         _THREAD_LOCALS._current_frame = self._parent
                 else:
                     raise ValueError('startup_behaviour must be FrameStartupBehaviour.delayed or FrameStartupBehaviour.immediate')
+            else: # If framefunc is a regular function
+                AbstractEventLoop.sendevent(self.ready, None, None, True) # Send ready event
 
             # Activate parent
             _THREAD_LOCALS._current_frame = self._parent
