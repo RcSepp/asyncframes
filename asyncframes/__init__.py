@@ -1149,7 +1149,7 @@ class Primitive(object):
 
         # Find parent frame of class 'owner'
         self._owner = find_parent(owner)
-        if not self._owner:
+        if self._owner is None:
             raise InvalidOperationException(self.__class__.__name__ + " can't be defined outside " + owner.__name__)
 
         # Register with parent frame
