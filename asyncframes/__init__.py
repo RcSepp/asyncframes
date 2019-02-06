@@ -362,6 +362,13 @@ class Awaitable(collections.abc.Awaitable):
         self._eventloop_affinity = None
         self.exception_handler = None
 
+    def _ondispose(self):
+        """Virtual function for cleaning up a derived class.
+
+        This function is called after awaiting frames have been woken, but before the class is deleted."""
+
+        pass
+
     def _remove(self, process_counter=None, blocking=False, ondone=lambda result: None):
         # Mark self as removed
         if self._removed:
@@ -395,6 +402,7 @@ class Awaitable(collections.abc.Awaitable):
                     for listener in listeners:
                         _THREAD_LOCALS._current_eventloop._enqueue(0, listener.process, (self, self._result), listener._eventloop_affinity)
 
+        self._ondispose()
         del self
         ondone(True)
         if process_counter:
