@@ -18,11 +18,11 @@ import warnings
 
 __all__ = [
     'all_', 'animate', 'any_', 'Awaitable', 'AbstractEventLoop', 'Event',
-    'find_parent', 'Frame', 'FrameStartupBehaviour', 'FreeEventArgs',
-    'get_current_eventloop_index', 'InvalidOperationException', 'hold',
-    'PFrame', 'Primitive', 'sleep'
+    'find_parent', 'Frame', 'FrameMeta', 'FrameStartupBehaviour',
+    'FreeEventArgs', 'get_current_eventloop_index', 'InvalidOperationException',
+    'hold', 'PFrame', 'Primitive', 'sleep'
 ]
-__version__ = '2.1.1'
+__version__ = '2.2.0'
 
 
 class ThreadLocals(threading.local):
@@ -346,14 +346,28 @@ class Awaitable(collections.abc.Awaitable):
         name (str): The name of the awaitable.
     """
 
-    def __init__(self, name):
+    def __init__(self, name, singleshot, lifebound):
         self.__name__ = name
-        self._parent = None
+        self.singleshot = singleshot
+        self.lifebound = lifebound
+        self.fired = False
+        self._parent = _THREAD_LOCALS._current_frame
+        if self._parent is not None:
+            self._parent._children.append(self)
         self._removed = False
         self._result = None
         self._listeners = set()
+        self._current_inline_frame = self
+        self._is_inline_frame = False
         self._eventloop_affinity = None
         self.exception_handler = None
+
+    def _ondispose(self):
+        """Virtual function for cleaning up a derived class.
+
+        This function is called after awaiting frames have been woken, but before the class is deleted."""
+
+        pass
 
     def _remove(self, process_counter=None, blocking=False, ondone=lambda result: None):
         # Mark self as removed
@@ -365,27 +379,30 @@ class Awaitable(collections.abc.Awaitable):
         self._removed = True
 
         # Remove self from parent frame
-        if self._parent:
+        if self._parent is not None:
             self._parent._children.remove(self)
 
-        # Wake up listeners
-        if self._listeners:
-            listeners = self._listeners
-            self._listeners = set()
+        if self.lifebound:
+            # Wake up listeners
+            self.fired = True
+            if self._listeners:
+                listeners = self._listeners
+                self._listeners = set()
 
-            if blocking:
-                if process_counter:
-                    process_counter.add(len(listeners))
+                if blocking:
+                    if process_counter:
+                        process_counter.add(len(listeners))
 
-                for listener in listeners:
-                    if listener._eventloop_affinity is None or listener._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
-                        listener.process(self, self._result, process_counter, blocking)
-                    else:
-                        listener._eventloop_affinity._invoke(0, listener.process, (self, self._result, process_counter, blocking))
-            else:
-                for listener in listeners:
-                    _THREAD_LOCALS._current_eventloop._enqueue(0, listener.process, (self, self._result), listener._eventloop_affinity)
+                    for listener in listeners:
+                        if listener._eventloop_affinity is None or listener._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
+                            listener.process(self, self._result, process_counter, blocking)
+                        else:
+                            listener._eventloop_affinity._invoke(0, listener.process, (self, self._result, process_counter, blocking))
+                else:
+                    for listener in listeners:
+                        _THREAD_LOCALS._current_eventloop._enqueue(0, listener.process, (self, self._result), listener._eventloop_affinity)
 
+        self._ondispose()
         del self
         ondone(True)
         if process_counter:
@@ -397,12 +414,12 @@ class Awaitable(collections.abc.Awaitable):
 
         Returns:
             Event: An awaitable event.
-            
+
             The remove event returns True once the awaitable has been removed or False if
             the request was either canceled, or the awaitable had already been removed before.
         """
 
-        remove_event = Event(str(self.__name__) + ".remove", singleshot=True)
+        remove_event = Event(str(self.__name__) + ".remove", singleshot=True, lifebound=False)
         process_counter = _AtomicCounter(1, lambda result: AbstractEventLoop.sendevent(remove_event, result, None, True)) # Add process: Frame.remove
         process_counter.on_zero_args = (True,) # Default remove() result to True
         def onremoved(result):
@@ -426,8 +443,11 @@ class Awaitable(collections.abc.Awaitable):
         """Make awaitables sortable by name."""
         return self.__name__ < other.__name__
 
+    def __bool__(self):
+        return (self.lifebound and self._removed) or (self.singleshot and self.fired)
+
     def __await__(self):
-        if self.removed: # If this awaitable already finished
+        if self: # If this awaitable already finished
             return self._result
         try:
             return (yield self)
@@ -451,7 +471,7 @@ class Awaitable(collections.abc.Awaitable):
             blocking (bool, optional): Defaults to False. If True, doesn't return until the event was fully processed.
         """
 
-        _THREAD_LOCALS._current_frame = self # Activate self
+        _THREAD_LOCALS._current_frame = self._current_inline_frame # Activate self
         try:
             self._step(sender, msg)
         except BaseException as err:
@@ -470,7 +490,7 @@ class Awaitable(collections.abc.Awaitable):
                 # Call exception handler
                 if err != msg:
                     awaitable = self
-                    while awaitable:
+                    while awaitable is not None:
                         if awaitable.exception_handler:
                             try:
                                 awaitable.exception_handler(self, err)
@@ -479,7 +499,7 @@ class Awaitable(collections.abc.Awaitable):
                             else:
                                 break
                         awaitable = awaitable._parent
-                    if not awaitable:
+                    if awaitable is None:
                         maineventloop = _THREAD_LOCALS._current_eventloop.eventloops[0]
                         maineventloop._exception = err
                         if maineventloop._eventloop_affinity is None or maineventloop._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
@@ -487,8 +507,32 @@ class Awaitable(collections.abc.Awaitable):
                         else:
                             maineventloop._eventloop_affinity._invoke(0, maineventloop._stop, ())
 
-            # Remove awaitable and propagate event
-            self._remove(process_counter, blocking)
+            if self.singleshot:
+                if process_counter:
+                    process_counter.add(1)
+                self._remove(process_counter, blocking) # Remove awaitable and propagate event
+
+            # Wake up listeners
+            self.fired = True
+            if self._listeners:
+                listeners = self._listeners
+                self._listeners = set()
+
+                if blocking:
+                    if process_counter:
+                        process_counter.add(len(listeners))
+
+                    for listener in listeners:
+                        if listener._eventloop_affinity is None or listener._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
+                            listener.process(self, self._result, process_counter, blocking)
+                        else:
+                            listener._eventloop_affinity._invoke(0, listener.process, (self, self._result, process_counter, blocking))
+                else:
+                    for listener in listeners:
+                        _THREAD_LOCALS._current_eventloop._enqueue(0, listener.process, (self, self._result), listener._eventloop_affinity)
+
+            # if self.singleshot:
+            #     return # Don't decrease process_counter, since it was already decreased by self._remove()
         else:
             if getattr(self, 'ready', True): # If self is ready or self doesn't have a ready event
                 # Send ready event to all listeners that have a ready event, but aren't ready yet
@@ -496,8 +540,8 @@ class Awaitable(collections.abc.Awaitable):
                     if not getattr(listener, 'ready', True):
                         AbstractEventLoop.sendevent(listener.ready, None, None, True)
 
-            if process_counter:
-                process_counter.sub(1)
+        if process_counter:
+            process_counter.sub(1)
 
     def __and__(self, other):
         """Register A & B as shortcut for ``all_(A, B)``.
@@ -535,38 +579,9 @@ class Event(Awaitable):
         singleshot (bool, optional): Defaults to False. If True, removes the event after it has been woken.
     """
 
-    def __init__(self, name, singleshot=False):
-        super().__init__(name)
-        self.singleshot = singleshot
+    def __init__(self, name, singleshot=False, lifebound=False):
+        super().__init__(name, singleshot, lifebound)
         self.eventloop = _THREAD_LOCALS._current_eventloop # Store creating eventloop, as a fallback in case self.post() is called from a thread without an eventloop
-
-    def _remove(self, process_counter=None, blocking=False, ondone=lambda result: None):
-        if self.singleshot:
-            super()._remove(process_counter, blocking, ondone)
-        else:
-            # Wake up listeners
-            if self._listeners:
-                listeners = self._listeners
-                self._listeners = set()
-
-                if blocking:
-                    if process_counter is not None:
-                        process_counter.add(len(listeners))
-
-                    for listener in listeners:
-                        if listener._eventloop_affinity is None or listener._eventloop_affinity == _THREAD_LOCALS._current_eventloop:
-                            listener.process(self, self._result, process_counter, blocking)
-                        else:
-                            listener._eventloop_affinity._invoke(0, listener.process, (self, self._result, process_counter, blocking))
-                else:
-                    for listener in listeners:
-                        _THREAD_LOCALS._current_eventloop._enqueue(0, listener.process, (self, self._result), listener._eventloop_affinity)
-            ondone(False)
-            if process_counter:
-                process_counter.sub(1)
-
-    def __bool__(self):
-        return self._removed
 
     def _step(self, sender, msg):
         """Handle incoming events.
@@ -613,13 +628,13 @@ class all_(Awaitable):
     """
 
     def __init__(self, *awaitables):
-        super().__init__("all({})".format(", ".join(str(a) for a in awaitables)))
+        super().__init__("all({})".format(", ".join(str(a) for a in awaitables)), singleshot=True, lifebound=True)
         self._remove_lock = threading.Lock()
 
         self._awaitables = collections.defaultdict(list)
         self._result = [None] * len(awaitables)
         for i, awaitable in enumerate(awaitables):
-            if awaitable.removed:
+            if awaitable:
                 self._result[i] = awaitable._result
             else:
                 self._awaitables[awaitable].append(i)
@@ -628,10 +643,6 @@ class all_(Awaitable):
         if not self._awaitables:
             self._remove()
             return
-
-        self._parent = _THREAD_LOCALS._current_frame
-        if self._parent:
-            self._parent._children.append(self)
 
     def _step(self, sender, msg):
         """Respond to an awaking child.
@@ -686,22 +697,18 @@ class any_(Awaitable):
     """
 
     def __init__(self, *awaitables):
-        super().__init__("any({})".format(", ".join(str(a) for a in awaitables)))
+        super().__init__("any({})".format(", ".join(str(a) for a in awaitables)), singleshot=True, lifebound=True)
         self._remove_lock = threading.Lock()
 
         self._awaitables = set()
         for awaitable in awaitables:
-            if awaitable.removed:
+            if awaitable:
                 self._result = (awaitable, awaitable._result)
                 self._remove()
                 return
             else:
                 self._awaitables.add(awaitable)
                 awaitable._listeners.add(self)
-
-        self._parent = _THREAD_LOCALS._current_frame
-        if self._parent:
-            self._parent._children.append(self)
 
     def _step(self, sender, msg):
         """Respond to an awaking child.
@@ -756,7 +763,7 @@ class sleep(Event):
     """
 
     def __init__(self, seconds=0.0):
-        super().__init__("sleep({})".format(seconds), singleshot=True)
+        super().__init__("sleep({})".format(seconds), singleshot=True, lifebound=False)
 
         # Raise event
         self.post(None, max(0, seconds))
@@ -769,7 +776,7 @@ class hold(Event):
     """
 
     def __init__(self):
-        super().__init__("hold()", singleshot=True)
+        super().__init__("hold()", singleshot=True, lifebound=False)
     def _step(self, sender, msg):
         """ Ignore any incoming events."""
 
@@ -785,7 +792,7 @@ class animate(Event):
     """
 
     def __init__(self, seconds, callback, interval=0.0):
-        super().__init__("animate()", singleshot=True)
+        super().__init__("animate()", singleshot=True, lifebound=False)
         self.seconds = seconds
         self.callback = callback
         self.interval = interval
@@ -826,6 +833,12 @@ class FrameMeta(abc.ABCMeta):
             frameclass.Factory = type(frameclass.__name__ + '.Factory', (frameclass.Factory,), {}) # Derive factory from base class factory
         frameclass.Factory.frameclass = frameclass
         return frameclass
+
+    def __enter__(self):
+        return self().__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self().__exit__(exc_type, exc_val, exc_tb)
 
 class Frame(Awaitable, metaclass=FrameMeta):
     """An object within the frame hierarchy.
@@ -891,6 +904,10 @@ class Frame(Awaitable, metaclass=FrameMeta):
                 Frame: The newly created frame instance.
             """
 
+            if self.framefunc is None:
+                self.framefunc = frameargs[0]
+                return self
+
             if _THREAD_LOCALS._current_eventloop is None:
                 raise InvalidOperationException("Can't call frame without a running event loop")
             frame = super(Frame, self.__class__.frameclass).__new__(self.__class__.frameclass)
@@ -898,22 +915,47 @@ class Frame(Awaitable, metaclass=FrameMeta):
             frame.create(self.framefunc, *frameargs, **framekwargs)
             return frame
 
+        def __enter__(self):
+            if self.framefunc is None:
+                # Instantiate frame class with empty framefunc
+                self.framefunc = lambda: None
+                self.framefunc.__name__ = self.frameclass.__name__
+                with_frame = self()
+                self.framefunc = None
+            else:
+                # Instantiate frame class with self.framefunc
+                with_frame = self()
+            with_frame._is_inline_frame = True
+
+            # Activate frame instance
+            non_with_frame_parent = _THREAD_LOCALS._current_frame
+            while non_with_frame_parent._is_inline_frame:
+                non_with_frame_parent = non_with_frame_parent._parent
+            non_with_frame_parent._current_inline_frame = with_frame._current_inline_frame
+            _THREAD_LOCALS._current_frame = with_frame._current_inline_frame
+
+            return with_frame
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            # Activate parent
+            non_with_frame_parent = _THREAD_LOCALS._current_frame
+            while non_with_frame_parent._is_inline_frame:
+                non_with_frame_parent = non_with_frame_parent._parent
+            non_with_frame_parent._current_inline_frame = _THREAD_LOCALS._current_frame._parent
+            _THREAD_LOCALS._current_frame = _THREAD_LOCALS._current_frame._parent
+
     def __new__(cls, *frameclassargs, **frameclasskwargs):
         if len(frameclassargs) == 1 and not frameclasskwargs and callable(frameclassargs[0]): # If @frame was called without parameters
-            framefunc = frameclassargs[0]
-            frameclassargs = ()
-            return cls.Factory(framefunc, frameclassargs, frameclasskwargs)
+            return cls.Factory(frameclassargs[0], (), {})
         else: # If @frame was called with parameters
-            return lambda framefunc: cls.Factory(framefunc, frameclassargs, frameclasskwargs)
+            return cls.Factory(None, frameclassargs, frameclasskwargs)
 
     def __init__(self, startup_behaviour=FrameStartupBehaviour.delayed, thread_idx=None):
         if thread_idx is not None and (thread_idx < 0 or thread_idx >= len(_THREAD_LOCALS._current_eventloop.eventloops)):
             raise ValueError("thread_idx must be an index between 0 and " + str(len(_THREAD_LOCALS._current_eventloop.eventloops)))
-        super().__init__(self.__class__.__name__)
+        super().__init__(self.__class__.__name__, singleshot=True, lifebound=True)
+        _THREAD_LOCALS._current_frame = self._current_inline_frame
         self.startup_behaviour = startup_behaviour
-        self._parent = _THREAD_LOCALS._current_frame
-        if self._parent:
-            self._parent._children.append(self)
         self._children = []
         self._activechild = None
         self._primitives = []
@@ -927,6 +969,7 @@ class Frame(Awaitable, metaclass=FrameMeta):
         if thread_idx is not None:
             self._eventloop_affinity = self._eventloop_affinity.eventloops[thread_idx]
         self._remove_lock = threading.Lock()
+        _THREAD_LOCALS._current_frame = self._current_inline_frame._parent
 
     def create(self, framefunc, *frameargs, **framekwargs):
         """Start the frame function with the given arguments.
@@ -938,10 +981,11 @@ class Frame(Awaitable, metaclass=FrameMeta):
 
         if framefunc and not self.removed and self._generator is None:
             self.__name__ = framefunc.__name__
+            self.ready.__name__ = str(self.__name__) + ".ready"
             self.free.__name__ = str(self.__name__) + ".free"
 
             # Activate self
-            _THREAD_LOCALS._current_frame = self
+            _THREAD_LOCALS._current_frame = self._current_inline_frame
 
             hasself = 'self' in inspect.signature(framefunc).parameters
             self._generator = framefunc(self, *frameargs, **framekwargs) if hasself else framefunc(*frameargs, **framekwargs)
@@ -958,12 +1002,14 @@ class Frame(Awaitable, metaclass=FrameMeta):
                         pass
                     finally:
                         # Activate parent
-                        _THREAD_LOCALS._current_frame = self._parent
+                        _THREAD_LOCALS._current_frame = self._current_inline_frame._parent
                 else:
                     raise ValueError('startup_behaviour must be FrameStartupBehaviour.delayed or FrameStartupBehaviour.immediate')
+            else: # If framefunc is a regular function
+                AbstractEventLoop.sendevent(self.ready, None, None, True) # Send ready event
 
             # Activate parent
-            _THREAD_LOCALS._current_frame = self._parent
+            _THREAD_LOCALS._current_frame = self._current_inline_frame._parent
 
     def _step(self, sender, msg):
         """Resume the frame coroutine.
@@ -1012,8 +1058,8 @@ class Frame(Awaitable, metaclass=FrameMeta):
         process_counter.add(len(self._children))
 
         # Send child frame free events
-        for child in self._children:
-            if isinstance(child, Frame):
+        for child in self._children[:]:
+            if not child.removed and isinstance(child, Frame):
                 child._send_free_event(free_args, process_counter)
             else:
                 process_counter.sub(1)
@@ -1149,11 +1195,18 @@ class Primitive(object):
 
         # Find parent frame of class 'owner'
         self._owner = find_parent(owner)
-        if not self._owner:
+        if self._owner is None:
             raise InvalidOperationException(self.__class__.__name__ + " can't be defined outside " + owner.__name__)
 
         # Register with parent frame
         self._owner._primitives.append(self)
+
+    def _ondispose(self):
+        """Virtual function for cleaning up a derived class.
+
+        This function is called before the class is deleted."""
+
+        pass
 
     def remove(self):
         """Remove this primitive from its owner.
@@ -1166,6 +1219,8 @@ class Primitive(object):
             return False
         self._removed = True
         self._owner._primitives.remove(self)
+        self._ondispose()
+        del self
         return True
 
 
@@ -1191,6 +1246,6 @@ def find_parent(parenttype):
     """
 
     parent = _THREAD_LOCALS._current_frame
-    while parent and not issubclass(type(parent), parenttype):
+    while parent is not None and not isinstance(parent, parenttype):
         parent = parent._parent
     return parent

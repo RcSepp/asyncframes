@@ -8,7 +8,7 @@ asyncframes - Parallel programming for software engineers
 
 .. |pypi_v1| image:: https://img.shields.io/badge/pypi-v1.1-blue.svg
     :target: https://pypi.org/project/asyncframes/1.1.1/
-.. |pypi_v2| image:: https://img.shields.io/badge/pypi-v2.1-blue.svg
+.. |pypi_v2| image:: https://img.shields.io/badge/pypi-v2.2-blue.svg
     :target: https://pypi.org/project/asyncframes/
 
 .. |github_v1| image:: https://img.shields.io/badge/github-v1-brightgreen.svg?style=social&logo=github

@@ -1,6 +1,13 @@
 Changelog
 =========
 
+2.2.0 (2019-02-18)
+------------------
+
+- Inline frames - Quickly create frame hierarchies using Python's "with" syntax.
+- Lifebound awaitables - Create awaitables that fire when they are removed by passing lifebound=True.
+- Destructors - Define a destructor for any Awaitable or Primitive by overloading _ondispose().
+
 2.1.0 (2019-01-07)
 ------------------
 

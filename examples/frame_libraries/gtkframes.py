@@ -41,7 +41,7 @@ class ScrolledWindow(Container, Gtk.ScrolledWindow, metaclass=GtkFrame):
         Frame.__init__(self)
         Gtk.ScrolledWindow.__init__(self, *args, **kwargs)
         parent = find_parent(Container)
-        if not parent:
+        if parent is None:
             raise Exception("ScrolledWindow needs to be defined inside a Window")
         parent.add(self)
         _connect_events(self, Gtk.Widget)
@@ -54,7 +54,7 @@ class Box(Container, Gtk.Box, metaclass=GtkFrame):
         Frame.__init__(self)
         Gtk.Box.__init__(self, *args, **kwargs)
         parent = find_parent(Container)
-        if not parent:
+        if parent is None:
             raise Exception("Box needs to be defined inside a Window")
         parent.add(self)
         _connect_events(self, Gtk.Widget)
