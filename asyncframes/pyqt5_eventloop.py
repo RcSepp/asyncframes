@@ -12,7 +12,7 @@ import asyncframes
 
 
 class EventLoopMeta(type(QObject), abc.ABCMeta):
-	pass
+    pass
 class EventLoop(asyncframes.AbstractEventLoop, QObject, metaclass=EventLoopMeta):
     """An implementation of AbstractEventLoop based on PyQt5.
 
@@ -56,7 +56,7 @@ class EventLoop(asyncframes.AbstractEventLoop, QObject, metaclass=EventLoopMeta)
 
     def _post(self, delay, callback, args):
         QTimer.singleShot(1000 * delay, functools.partial(callback, *args))
-    
+
     def _invoke(self, delay, callback, args):
         self.metaObject().invokeMethod(self, "_invoke_slot", Qt.QueuedConnection, Q_ARG(float, delay), Q_ARG(object, functools.partial(callback, *args)))
 
