@@ -22,7 +22,7 @@ __all__ = [
     'FreeEventArgs', 'get_current_eventloop_index', 'InvalidOperationException',
     'hold', 'PFrame', 'Primitive', 'sleep'
 ]
-__version__ = '2.1.1'
+__version__ = '2.2.0'
 
 
 class ThreadLocals(threading.local):
