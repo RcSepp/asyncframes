@@ -1201,6 +1201,13 @@ class Primitive(object):
         # Register with parent frame
         self._owner._primitives.append(self)
 
+    def _ondispose(self):
+        """Virtual function for cleaning up a derived class.
+
+        This function is called before the class is deleted."""
+
+        pass
+
     def remove(self):
         """Remove this primitive from its owner.
 
@@ -1212,6 +1219,8 @@ class Primitive(object):
             return False
         self._removed = True
         self._owner._primitives.remove(self)
+        self._ondispose()
+        del self
         return True
 
 
